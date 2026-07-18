@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}LLM Wiki{% endblock %}</title>
+  <style>
+    :root { --fg:#1a1a1a; --bg:#fff; --muted:#667; --accent:#0b5cad; --border:#ddd; }
+    @media (prefers-color-scheme: dark) {
+      :root { --fg:#e8e8e8; --bg:#16181d; --muted:#9aa; --accent:#6ab0f3; --border:#333; }
+    }
+    body { font:16px/1.55 system-ui,sans-serif; color:var(--fg); background:var(--bg);
+           max-width:60rem; margin:0 auto; padding:1rem 1.5rem 4rem; }
+    a { color:var(--accent); }
+    nav { display:flex; gap:1rem; align-items:baseline; border-bottom:1px solid var(--border);
+          padding-bottom:.6rem; margin-bottom:1.2rem; flex-wrap:wrap; }
+    nav .spacer { flex:1; }
+    nav .who { color:var(--muted); font-size:.85rem; }
+    h1,h2,h3 { line-height:1.25; }
+    textarea, input[type=text], input[type=url] { width:100%; box-sizing:border-box;
+      background:var(--bg); color:var(--fg); border:1px solid var(--border);
+      border-radius:6px; padding:.5rem; font:inherit; }
+    button { background:var(--accent); color:#fff; border:0; border-radius:6px;
+      padding:.45rem .9rem; font:inherit; cursor:pointer; }
+    button.secondary { background:transparent; color:var(--accent);
+      border:1px solid var(--accent); }
+    .card { border:1px solid var(--border); border-radius:8px; padding:1rem; margin:.8rem 0; }
+    .muted { color:var(--muted); font-size:.85rem; }
+    pre.diff { overflow-x:auto; background:rgba(128,128,128,.08); padding:.8rem;
+      border-radius:6px; font-size:.82rem; }
+    .mode-toggle { border:1px solid var(--border); border-radius:999px;
+      padding:.3rem .9rem; cursor:pointer; user-select:none; display:inline-block; }
+    .mode-toggle[data-mode=automatic] { border-color:var(--accent); color:var(--accent); }
+    table { border-collapse:collapse; width:100%; }
+    td, th { border:1px solid var(--border); padding:.35rem .6rem; text-align:left;
+      font-size:.9rem; }
+    .cols { display:flex; gap:1.5rem; flex-wrap:wrap; }
+    .cols > * { flex:1; min-width:16rem; }
+  </style>
+</head>
+<body>
+<nav>
+  <strong><a href="/">LLM Wiki</a></strong>
+  <a href="/individual/{{ user.id }}/">Personal</a>
+  {% for gid, name in user.teams.items() %}
+    <a href="/team/{{ gid }}/">{{ name }}</a>
+  {% endfor %}
+  <span class="spacer"></span>
+  <span class="who">{{ user.name }}</span>
+</nav>
+{% block content %}{% endblock %}
+</body>
+</html>

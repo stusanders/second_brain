@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Ingest log{% endblock %}
+{% block content %}
+<p class="muted"><a href="/{{ tier }}/{{ owner }}/">&larr; back to wiki</a></p>
+<h1>Ingest log</h1>
+{% if entries %}
+<table>
+  <tr><th>When</th><th>Source</th><th>Type</th><th>Mode</th><th>Pages affected</th></tr>
+  {% for e in entries %}
+  <tr>
+    <td>{{ e.timestamp[:16].replace("T", " ") }}</td>
+    <td>{{ e.source_ref }}</td>
+    <td>{{ e.source_type }}</td>
+    <td>{{ e.mode }}</td>
+    <td>{{ e.pages_affected | length }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">Nothing ingested yet.</p>{% endif %}
+{% endblock %}

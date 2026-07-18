@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Push preview{% endblock %}
+{% block content %}
+<h1>Push preview</h1>
+<p>Pushing <strong>{{ preview.source_page.title }}</strong> &rarr;
+   {% if preview.is_new_page %}new team page{% else %}append to{% endif %}
+   <strong>{{ preview.target_title }}</strong></p>
+
+{% if preview.conflicts %}
+  <div class="card" style="border-color:#c77">
+    <h3>Possible conflicts flagged</h3>
+    <ul>{% for c in preview.conflicts %}<li>{{ c }}</li>{% endfor %}</ul>
+    <p class="muted">Pushing anyway writes these notes into the appended content so future
+       readers see the tension. Your call — go / no-go.</p>
+  </div>
+{% endif %}
+
+<pre class="diff">{{ preview.diff }}</pre>
+
+<form method="post" action="/push/{{ preview.id }}/confirm" style="display:inline">
+  <button type="submit">Confirm push</button>
+</form>
+<form method="post" action="/push/{{ preview.id }}/discard" style="display:inline">
+  <button type="submit" class="secondary">Cancel</button>
+</form>
+{% endblock %}

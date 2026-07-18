@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Manual ingest{% endblock %}
+{% block content %}
+<h1>Manual ingest: {{ session.source.source_ref }}</h1>
+<p class="muted">{{ session.source.source_type }} · discussion before anything is written</p>
+
+{% for m in session.messages if m.role != "system" %}
+  <div class="card">
+    <p class="muted">{{ "You" if m.role == "user" else "Agent" }}</p>
+    <div style="white-space:pre-wrap">{{ m.content }}</div>
+  </div>
+{% endfor %}
+
+{% if session.diff is none %}
+  <form method="post" action="/manual/{{ session.id }}/message">
+    <p><textarea name="message" rows="3" placeholder="Discuss the takeaways…" required></textarea></p>
+    <button type="submit">Send</button>
+  </form>
+  <form method="post" action="/manual/{{ session.id }}/propose" style="margin-top:.6rem">
+    <button type="submit" class="secondary">Done discussing — draft the page</button>
+  </form>
+{% else %}
+  <h2>Proposed: {{ session.proposed_title }}</h2>
+  <pre class="diff">{{ session.diff }}</pre>
+  <form method="post" action="/manual/{{ session.id }}/approve" style="display:inline">
+    <button type="submit">Approve &amp; write</button>
+  </form>
+  <form method="post" action="/manual/{{ session.id }}/message" style="display:inline">
+    <input type="hidden" name="message" value="Let's revise — see my next message.">
+  </form>
+  <form method="post" action="/manual/{{ session.id }}/discard" style="display:inline">
+    <button type="submit" class="secondary">Discard</button>
+  </form>
+{% endif %}
+{% endblock %}
