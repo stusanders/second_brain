@@ -58,9 +58,7 @@ def version_blob_path(tier: str, owner_id: str, slug: str, version_number: int) 
 
 
 def write_text(path: str, content: str, *, lease_id: str | None = None) -> None:
-    _wiki_container().upload_blob(
-        path, content.encode("utf-8"), overwrite=True, lease=lease_id
-    )
+    _wiki_container().upload_blob(path, content.encode("utf-8"), overwrite=True, lease=lease_id)
 
 
 def read_text(path: str) -> str | None:

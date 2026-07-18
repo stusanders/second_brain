@@ -180,9 +180,7 @@ def write_page(page: Page, *, change_type: str, author_id: str) -> Page:
         if lease_id:
             blob_store.release_lease(page.blob_path, lease_id)
 
-    version_path = blob_store.version_blob_path(
-        page.tier, page.owner_id, page.slug, page.version
-    )
+    version_path = blob_store.version_blob_path(page.tier, page.owner_id, page.slug, page.version)
     blob_store.write_text(version_path, page.body)
 
     db.get_container("page_index").upsert_item(

@@ -71,8 +71,8 @@ def current_user(request: Request) -> User:
         raise HTTPException(status_code=307, headers={"Location": "/auth/login"})
     try:
         return User(**_serializer().loads(raw))
-    except BadSignature:
-        raise HTTPException(status_code=307, headers={"Location": "/auth/login"})
+    except BadSignature as e:
+        raise HTTPException(status_code=307, headers={"Location": "/auth/login"}) from e
 
 
 def require_team(user: User, team_id: str) -> str:

@@ -14,7 +14,7 @@ All Cosmos documents carry a computed `partition_key` of the form
 import hashlib
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -27,7 +27,7 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def new_id() -> str:

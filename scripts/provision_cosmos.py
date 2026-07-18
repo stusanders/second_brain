@@ -45,7 +45,9 @@ def main() -> None:
             "(see docs/AZURE_SETUP_GUIDE.md §4) — this script only verifies "
             "and can't create them under Entra ID/RBAC auth."
         )
-    print(f"Cosmos database '{s.cosmos_database}' reachable with containers: {', '.join(CONTAINERS)}")
+    print(
+        f"Cosmos database '{s.cosmos_database}' reachable with containers: {', '.join(CONTAINERS)}"
+    )
 
     blob_store.ensure_containers()
     print(f"Blob containers ready: {s.blob_wiki_container}, {s.blob_sources_container}")

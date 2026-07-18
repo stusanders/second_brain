@@ -23,6 +23,7 @@ def _store_raw_source(source: ExtractedSource, user: User) -> str:
         "individual", user.id, source.filename or source.source_ref, source.raw_bytes
     )
 
+
 SUMMARY_SYSTEM = (
     "You maintain a user's personal knowledge wiki. Given a source document, "
     "write a concise wiki page in markdown capturing its key takeaways, facts, "
@@ -97,7 +98,10 @@ _sessions: dict[str, ManualSession] = {}
 def start_manual_session(source: ExtractedSource, user: User) -> ManualSession:
     session = ManualSession(id=uuid.uuid4().hex, user_id=user.id, source=source)
     session.messages = [
-        {"role": "system", "content": DISCUSSION_SYSTEM + "\n\n<source>\n" + source.text + "\n</source>"},
+        {
+            "role": "system",
+            "content": DISCUSSION_SYSTEM + "\n\n<source>\n" + source.text + "\n</source>",
+        },
         {"role": "user", "content": "I've just dropped this source. What did you find notable?"},
     ]
     reply = ab.call_model_chat(session.messages, max_tokens=600)

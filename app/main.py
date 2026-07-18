@@ -2,7 +2,7 @@ import re
 import uuid
 
 import markdown as md
-from fastapi import FastAPI, Depends, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -139,12 +139,12 @@ async def ingest(
     mode: str = Form(...),  # whatever mode the toggle showed at submission
     url: str = Form(""),
     pasted: str = Form(""),
-    files: list[UploadFile] = [],
+    files: list[UploadFile] | None = None,
     user: User = Depends(auth.current_user),
 ):
     sources: list[extractors.ExtractedSource] = []
     try:
-        for f in files:
+        for f in files or []:
             if f.filename:
                 sources.append(extractors.extract_file(f.filename, await f.read()))
         if url.strip():
@@ -152,7 +152,7 @@ async def ingest(
         if pasted.strip():
             sources.append(extractors.extract_pasted(pasted))
     except extractors.ExtractionError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     if not sources:
         raise HTTPException(422, "Nothing to ingest.")
 
@@ -174,9 +174,7 @@ def manual_session(session_id: str, request: Request, user: User = Depends(auth.
     session = pipeline.get_session(session_id, user)
     if not session:
         raise HTTPException(404, "Session not found (it may have expired).")
-    return templates.TemplateResponse(
-        request, "manual.html", {"user": user, "session": session}
-    )
+    return templates.TemplateResponse(request, "manual.html", {"user": user, "session": session})
 
 
 @app.post("/manual/{session_id}/message")
@@ -234,9 +232,7 @@ def push_preview(preview_id: str, request: Request, user: User = Depends(auth.cu
     preview = push.get_preview(preview_id, user)
     if not preview:
         raise HTTPException(404, "Preview not found (it may have expired).")
-    return templates.TemplateResponse(
-        request, "push.html", {"user": user, "preview": preview}
-    )
+    return templates.TemplateResponse(request, "push.html", {"user": user, "preview": preview})
 
 
 @app.post("/push/{preview_id}/confirm")
