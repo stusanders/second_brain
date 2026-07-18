@@ -37,6 +37,7 @@ docker build -t llmwiki .
 | `app/auth.py` | Entra OIDC flow, session cookie, team access checks |
 | `app/wiki.py` | Wikilinks, index regeneration, individual-editable vs team-append-only rules |
 | `app/ingest/` | Extractors (pdf/docx/pptx/xlsx/csv/text/url) + manual/automatic pipeline; raw sources written to blob for provenance |
+| `app/query.py` | Query operation: ask a question, get a cited synthesized answer, optionally save it to the wiki via the same diff-review flow as ingest |
 | `app/push.py` | Individual→team push: placement, two-stage conflict check, preview/confirm |
 | `app/main.py` | Routes + templates |
 | `scripts/provision_cosmos.py` | Creates Cosmos containers (vector policy must be set at creation) + blob containers |
@@ -45,7 +46,6 @@ docker build -t llmwiki .
 
 - OCR for scanned PDFs (extractor raises a clear error for now)
 - Playwright rendering for JS-heavy pages (trafilatura path works today)
-- Query-as-write (save a query answer back to the wiki)
 - Formal Lint pass (contradictions, staleness, orphans) and its review queue
 - Per-user `_schema.md` governance/personalization document
 - Themes page and radial map view (clustering infra)
