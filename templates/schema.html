@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Schema doc{% endblock %}
+{% block content %}
+<p class="muted"><a href="/{{ tier }}/{{ owner }}/">&larr; back to wiki</a></p>
+<h1>Schema doc</h1>
+<p class="muted">Read by the agent at the start of every ingest, query, and lint pass.
+   Not application code — yours to edit.</p>
+
+<form method="post" action="/{{ tier }}/{{ owner }}/schema">
+  <textarea name="body" rows="26" style="font-family:ui-monospace,monospace">{{ body }}</textarea>
+  <p><button type="submit">Save</button></p>
+</form>
+{% endblock %}

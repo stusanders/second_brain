@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ page.title }}{% endblock %}
+{% block content %}
+<p class="muted"><a href="/{{ tier }}/{{ owner }}/">&larr; back to wiki</a></p>
+<h1>{{ page.title }}</h1>
+<p class="muted">v{{ page.version }} · updated {{ page.updated_at[:10] }}
+   {% if page.tier == "team" %} · append-only{% endif %}</p>
+
+{% if page.tier == "team" %}
+<p class="muted">
+  <a href="/team/{{ owner }}/derived/{{ page.slug }}">View current-view synthesis (machine-generated)</a>
+  · <form method="post" action="/team/{{ owner }}/derived/{{ page.slug }}/regenerate" style="display:inline">
+      <input type="hidden" name="page_id" value="{{ page.id }}">
+      <button type="submit" class="secondary" style="padding:.15rem .5rem;font-size:.85rem">Regenerate now</button>
+    </form>
+</p>
+{% endif %}
+
+<article>{{ html | safe }}</article>
+
+<div class="cols">
+  <div class="card">
+    <h3>Connections</h3>
+    <p class="muted">Links out:</p>
+    {% if links_out %}<ul>{% for p in links_out %}
+      <li><a href="/{{ tier }}/{{ owner }}/page/{{ p.id }}">{{ p.title }}</a></li>
+    {% endfor %}</ul>{% else %}<p class="muted">none</p>{% endif %}
+    <p class="muted">What links here:</p>
+    {% if backlinks %}<ul>{% for p in backlinks %}
+      <li><a href="/{{ tier }}/{{ owner }}/page/{{ p.id }}">{{ p.title }}</a></li>
+    {% endfor %}</ul>{% else %}<p class="muted">none</p>{% endif %}
+  </div>
+
+  {% if tier == "individual" and user.teams %}
+  <div class="card">
+    <h3>Push to team</h3>
+    <form method="post" action="/push/prepare">
+      <input type="hidden" name="page_id" value="{{ page.id }}">
+      <p><select name="team_id">
+        {% for gid, name in user.teams.items() %}
+          <option value="{{ gid }}">{{ name }}</option>
+        {% endfor %}
+      </select></p>
+      <button type="submit">Prepare push…</button>
+    </form>
+    <p class="muted">Runs placement + conflict check, then shows a preview before anything is written.</p>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h3>History</h3>
+    <ul>
+    {% for v in versions %}
+      <li class="muted">v{{ v.version_number }} · {{ v.timestamp[:16].replace("T", " ") }} · {{ v.change_type }}</li>
+    {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}

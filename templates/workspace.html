@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ "Personal" if tier == "individual" else "Team" }} wiki{% endblock %}
+{% block content %}
+<h1>{{ "Personal wiki" if tier == "individual" else user.teams.get(owner, "Team") ~ " wiki" }}</h1>
+
+<form method="get" action="/{{ tier }}/{{ owner }}/">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search the wiki…">
+</form>
+{% if results is not none %}
+  <div class="card">
+    <h3>Search results</h3>
+    {% if results %}
+      <ul>{% for r in results %}
+        <li><a href="/{{ tier }}/{{ owner }}/page/{{ r.page_id }}">{{ r.title }}</a>
+            <span class="muted">score {{ "%.3f"|format(r.score) }}</span></li>
+      {% endfor %}</ul>
+    {% else %}<p class="muted">No matches.</p>{% endif %}
+  </div>
+{% endif %}
+
+<div class="cols">
+  <div>
+    <h2>Pages</h2>
+    {% if pages %}
+      <ul>
+      {% for p in pages %}
+        <li><a href="/{{ tier }}/{{ owner }}/page/{{ p.id }}">{{ p.title }}</a>
+          {% if p.title == index_title %}<span class="muted">(generated)</span>{% endif %}</li>
+      {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No pages yet{% if tier == "individual" %} — drop a source to get started{% endif %}.</p>
+    {% endif %}
+    <p><a href="/{{ tier }}/{{ owner }}/query">Ask a question</a> ·
+       <a href="/{{ tier }}/{{ owner }}/log">Ingest log</a> ·
+       <a href="/{{ tier }}/{{ owner }}/schema">Schema doc</a> ·
+       <a href="/{{ tier }}/{{ owner }}/lint">Lint queue{% if lint_counts.total %} ({{ lint_counts.total }}){% endif %}</a> ·
+       <a href="/{{ tier }}/{{ owner }}/export">Export wiki</a></p>
+  </div>
+
+  {% if tier == "individual" %}
+  <div>
+    <h2>Ingest</h2>
+    <form method="post" action="/ingest" enctype="multipart/form-data">
+      <p>
+        <span id="mode-toggle" class="mode-toggle" data-mode="manual" tabindex="0"
+              title="Click or press 'm' to toggle">Mode: <strong id="mode-label">manual</strong></span>
+        <input type="hidden" name="mode" id="mode-input" value="manual">
+      </p>
+      <p><input type="file" name="files" multiple></p>
+      <p><input type="url" name="url" placeholder="…or paste an article/PDF URL"></p>
+      <p><textarea name="pasted" rows="4" placeholder="…or paste raw text"></textarea></p>
+      <button type="submit">Ingest</button>
+    </form>
+    <p class="muted">Manual: discussion + approval per source. Automatic: direct write, no gate.
+       Batches are always processed per-source.</p>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+  const toggle = document.getElementById("mode-toggle");
+  function flip() {
+    const inp = document.getElementById("mode-input");
+    inp.value = inp.value === "manual" ? "automatic" : "manual";
+    document.getElementById("mode-label").textContent = inp.value;
+    toggle.dataset.mode = inp.value;
+  }
+  if (toggle) {
+    toggle.addEventListener("click", flip);
+    document.addEventListener("keydown", (e) => {
+      // 'm' cycles the mode (Tab stays reserved for focus navigation)
+      if (e.key === "m" && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) flip();
+    });
+  }
+</script>
+{% endblock %}

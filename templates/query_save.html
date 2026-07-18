@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Save query result{% endblock %}
+{% block content %}
+<h1>Save to wiki: {{ changeset.items[0].title }}</h1>
+<p class="muted">Filed from the {{ changeset.log_source_ref }}</p>
+
+{% with approve_all_url="/query/save/" ~ changeset.id ~ "/approve-all",
+   approve_selected_url="/query/save/" ~ changeset.id ~ "/approve-selected",
+   reject_url="/query/save/" ~ changeset.id ~ "/discard" %}
+  {% include "changeset.html" %}
+{% endwith %}
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Push preview{% endblock %}
+{% block content %}
+<h1>Push preview</h1>
+<p>Pushing &rarr; <strong>{{ changeset.items[0].title }}</strong>
+   {% if changeset.items[0].is_new %}(new team page){% else %}(append){% endif %}</p>
+
+{% with approve_all_url="/push/" ~ changeset.id ~ "/approve-all",
+   approve_selected_url="/push/" ~ changeset.id ~ "/approve-selected",
+   reject_url="/push/" ~ changeset.id ~ "/discard" %}
+  {% include "changeset.html" %}
+{% endwith %}
+{% endblock %}

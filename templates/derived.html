@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Current view (machine-generated){% endblock %}
+{% block content %}
+<p class="muted"><a href="/team/{{ team_id }}/">&larr; back to wiki</a></p>
+<div class="card" style="border-color:var(--accent)">
+  <p class="muted">Machine-generated current-view synthesis — disposable, regenerated wholesale
+     from the append log below. It is never the source of truth; if it looks wrong, the fix is
+     regenerating it or filing a correction on the log, not editing this page (there's nothing
+     to edit — it isn't stored as an authored page).</p>
+</div>
+<article>{{ html | safe }}</article>
+{% endblock %}
