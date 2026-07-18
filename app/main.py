@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app import abstractions as ab
-from app import auth, push, wiki
+from app import auth, push, query, wiki
 from app.ingest import extractors, pipeline
 from app.models import User, make_partition_key
 
@@ -210,6 +210,72 @@ def manual_approve(session_id: str, user: User = Depends(auth.current_user)):
 def manual_discard(session_id: str, user: User = Depends(auth.current_user)):
     pipeline.discard(session_id)
     return RedirectResponse(f"/individual/{user.id}/", status_code=303)
+
+
+# ------------------------------------------------------------------- query
+
+
+@app.get("/{tier}/{owner}/query", response_class=HTMLResponse)
+def query_form(tier: str, owner: str, request: Request, user: User = Depends(auth.current_user)):
+    _scope_or_403(tier, owner, user)
+    return templates.TemplateResponse(
+        request, "query.html", {"user": user, "tier": tier, "owner": owner, "qa": None}
+    )
+
+
+@app.post("/{tier}/{owner}/query", response_class=HTMLResponse)
+def query_ask(
+    tier: str,
+    owner: str,
+    request: Request,
+    question: str = Form(...),
+    user: User = Depends(auth.current_user),
+):
+    _scope_or_403(tier, owner, user)
+    qa = query.ask(question, tier, owner)
+    return templates.TemplateResponse(
+        request, "query.html", {"user": user, "tier": tier, "owner": owner, "qa": qa}
+    )
+
+
+@app.post("/query/save")
+def query_save_prepare(
+    tier: str = Form(...),
+    owner: str = Form(...),
+    question: str = Form(...),
+    answer: str = Form(...),
+    user: User = Depends(auth.current_user),
+):
+    _scope_or_403(tier, owner, user)
+    qa = query.QueryAnswer(question=question, answer=answer, tier=tier, owner=owner)
+    draft = query.prepare_save(qa, user)
+    return RedirectResponse(f"/query/save/{draft.id}", status_code=303)
+
+
+@app.get("/query/save/{draft_id}", response_class=HTMLResponse)
+def query_save_preview(draft_id: str, request: Request, user: User = Depends(auth.current_user)):
+    draft = query.get_draft(draft_id, user)
+    if not draft:
+        raise HTTPException(404, "Draft not found (it may have expired).")
+    return templates.TemplateResponse(request, "query_save.html", {"user": user, "draft": draft})
+
+
+@app.post("/query/save/{draft_id}/approve")
+def query_save_approve(draft_id: str, user: User = Depends(auth.current_user)):
+    draft = query.get_draft(draft_id, user)
+    if not draft:
+        raise HTTPException(404)
+    page = query.approve(draft, user)
+    return RedirectResponse(f"/{draft.tier}/{draft.owner}/page/{page.id}", status_code=303)
+
+
+@app.post("/query/save/{draft_id}/discard")
+def query_save_discard(draft_id: str, user: User = Depends(auth.current_user)):
+    draft = query.get_draft(draft_id, user)
+    if draft:
+        query.discard(draft_id)
+        return RedirectResponse(f"/{draft.tier}/{draft.owner}/query", status_code=303)
+    return RedirectResponse("/", status_code=303)
 
 
 # -------------------------------------------------------------------- push

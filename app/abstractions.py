@@ -66,8 +66,14 @@ def call_model(prompt: str, context: str = "", *, system: str = "", max_tokens: 
         model=s.azure_openai_chat_deployment,
         messages=messages,
         max_completion_tokens=max_tokens,
+        reasoning_effort="low",
     )
-    return resp.choices[0].message.content or ""
+    content = resp.choices[0].message.content
+    if not content:
+        raise RuntimeError(
+            f"Model returned empty content (finish_reason={resp.choices[0].finish_reason!r})"
+        )
+    return content
 
 
 def call_model_chat(messages: list[dict], *, max_tokens: int = 2000) -> str:
@@ -77,8 +83,14 @@ def call_model_chat(messages: list[dict], *, max_tokens: int = 2000) -> str:
         model=s.azure_openai_chat_deployment,
         messages=messages,
         max_completion_tokens=max_tokens,
+        reasoning_effort="low",
     )
-    return resp.choices[0].message.content or ""
+    content = resp.choices[0].message.content
+    if not content:
+        raise RuntimeError(
+            f"Model returned empty content (finish_reason={resp.choices[0].finish_reason!r})"
+        )
+    return content
 
 
 # --------------------------------------------------------------------- embed

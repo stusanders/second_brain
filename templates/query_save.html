@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Save query result{% endblock %}
+{% block content %}
+<h1>Save to wiki: {{ draft.proposed_title }}</h1>
+<p class="muted">Filed from the question: &ldquo;{{ draft.question }}&rdquo;</p>
+
+<pre class="diff">{{ draft.diff }}</pre>
+
+<form method="post" action="/query/save/{{ draft.id }}/approve" style="display:inline">
+  <button type="submit">Approve &amp; write</button>
+</form>
+<form method="post" action="/query/save/{{ draft.id }}/discard" style="display:inline">
+  <button type="submit" class="secondary">Discard</button>
+</form>
+{% endblock %}

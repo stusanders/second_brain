@@ -14,6 +14,15 @@ WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)\]\]")
 INDEX_TITLE = "Index"
 
 
+def split_title(markdown: str) -> tuple[str, str]:
+    """First line '# Title' becomes the title; the rest is the body. Shared by
+    every model-drafted page (ingest, manual discussion, query-derived save)."""
+    lines = markdown.strip().splitlines()
+    if lines and lines[0].lstrip().startswith("#"):
+        return lines[0].lstrip("# ").strip(), "\n".join(lines[1:]).strip()
+    return "Untitled", markdown.strip()
+
+
 def resolve_links(body: str, scope: str) -> list[str]:
     """Map [[Title]] links in a body to existing page ids."""
     ids = []

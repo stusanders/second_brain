@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Query{% endblock %}
+{% block content %}
+<h1>Ask the {{ "personal" if tier == "individual" else "team" }} wiki</h1>
+
+<form method="post" action="/{{ tier }}/{{ owner }}/query">
+  <textarea name="question" rows="2" placeholder="Ask a question…" required>{{ qa.question if qa else "" }}</textarea>
+  <p><button type="submit">Ask</button></p>
+</form>
+
+{% if qa %}
+  <div class="card">
+    <p class="muted">Answer</p>
+    <div style="white-space:pre-wrap">{{ qa.answer }}</div>
+  </div>
+
+  {% if qa.sources %}
+    <p class="muted">Drawn from:
+      {% for s in qa.sources %}
+        <a href="/{{ tier }}/{{ owner }}/page/{{ s.page_id }}">{{ s.title }}</a>{{ ", " if not loop.last }}
+      {% endfor %}
+    </p>
+  {% endif %}
+
+  <form method="post" action="/query/save">
+    <input type="hidden" name="tier" value="{{ tier }}">
+    <input type="hidden" name="owner" value="{{ owner }}">
+    <input type="hidden" name="question" value="{{ qa.question }}">
+    <input type="hidden" name="answer" value="{{ qa.answer }}">
+    <button type="submit" class="secondary">Save this to the wiki</button>
+  </form>
+{% endif %}
+{% endblock %}

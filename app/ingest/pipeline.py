@@ -41,13 +41,6 @@ DISCUSSION_SYSTEM = (
 )
 
 
-def _split_title(markdown: str) -> tuple[str, str]:
-    lines = markdown.strip().splitlines()
-    if lines and lines[0].lstrip().startswith("#"):
-        return lines[0].lstrip("# ").strip(), "\n".join(lines[1:]).strip()
-    return "Untitled", markdown.strip()
-
-
 # ------------------------------------------------------------ automatic mode
 
 
@@ -60,7 +53,7 @@ def ingest_automatic(source: ExtractedSource, user: User) -> list[str]:
         context=source.text,
         system=SUMMARY_SYSTEM,
     )
-    title, body = _split_title(draft)
+    title, body = wiki.split_title(draft)
 
     log = IngestLogEntry(
         partition_key=scope,
@@ -137,7 +130,7 @@ def propose_page(session: ManualSession, user: User) -> ManualSession:
     )
     draft = ab.call_model_chat(session.messages, max_tokens=2000)
     session.messages.append({"role": "assistant", "content": draft})
-    title, body = _split_title(draft)
+    title, body = wiki.split_title(draft)
     session.proposed_title, session.proposed_body = title, body
 
     scope = make_partition_key("individual", user.id)
