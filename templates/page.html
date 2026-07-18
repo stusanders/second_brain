@@ -6,6 +6,16 @@
 <p class="muted">v{{ page.version }} · updated {{ page.updated_at[:10] }}
    {% if page.tier == "team" %} · append-only{% endif %}</p>
 
+{% if page.tier == "team" %}
+<p class="muted">
+  <a href="/team/{{ owner }}/derived/{{ page.slug }}">View current-view synthesis (machine-generated)</a>
+  · <form method="post" action="/team/{{ owner }}/derived/{{ page.slug }}/regenerate" style="display:inline">
+      <input type="hidden" name="page_id" value="{{ page.id }}">
+      <button type="submit" class="secondary" style="padding:.15rem .5rem;font-size:.85rem">Regenerate now</button>
+    </form>
+</p>
+{% endif %}
+
 <article>{{ html | safe }}</article>
 
 <div class="cols">

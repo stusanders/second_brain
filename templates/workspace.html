@@ -34,7 +34,8 @@
     <p><a href="/{{ tier }}/{{ owner }}/query">Ask a question</a> ·
        <a href="/{{ tier }}/{{ owner }}/log">Ingest log</a> ·
        <a href="/{{ tier }}/{{ owner }}/schema">Schema doc</a> ·
-       <a href="/{{ tier }}/{{ owner }}/lint">Lint queue{% if lint_counts.total %} ({{ lint_counts.total }}){% endif %}</a></p>
+       <a href="/{{ tier }}/{{ owner }}/lint">Lint queue{% if lint_counts.total %} ({{ lint_counts.total }}){% endif %}</a> ·
+       <a href="/{{ tier }}/{{ owner }}/export">Export wiki</a></p>
   </div>
 
   {% if tier == "individual" %}

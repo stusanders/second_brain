@@ -45,30 +45,45 @@ DISCUSSION_SYSTEM = (
 
 
 def ingest_automatic(source: ExtractedSource, user: User) -> list[str]:
-    """One independent summary per source, written directly — no approval gate.
-    Returns affected page titles."""
+    """One independent summary per source, written directly — no approval
+    gate. Still builds the full multi-page changeset (breadth is a
+    requirement, not just a manual-mode nicety — the build spec doesn't
+    scope "10-15 pages is normal for one source" to manual mode only) and
+    applies every item immediately. Returns affected page titles."""
     scope = make_partition_key("individual", user.id)
+    schema_ctx = schema.context_block("individual", user.id)
     draft = ab.call_model(
         "Summarize this source into a wiki page.",
         context=source.text,
-        system=SUMMARY_SYSTEM + "\n\n" + schema.context_block("individual", user.id),
+        system=SUMMARY_SYSTEM + "\n\n" + schema_ctx,
     )
     title, body = wiki.split_title(draft)
+    source_ref_id = _store_raw_source(source, user)
+
+    changeset = wiki.build_changeset(
+        tier="individual",
+        owner=user.id,
+        user=user,
+        primary_title=title,
+        primary_body=body,
+        log_source_type=source.source_type,
+        log_source_ref=source_ref_id,
+        log_mode="automatic",
+        schema_ctx=schema_ctx,
+        source_ref_id=source_ref_id,
+    )
+    pages = wiki.apply_changeset(changeset, None, user.id)  # None = approve-all
 
     log = IngestLogEntry(
         partition_key=scope,
         source_type=source.source_type,
-        source_ref=_store_raw_source(source, user),
+        source_ref=source_ref_id,
         mode="automatic",
         tier="individual",
+        pages_affected=[p.id for p in pages],
     )
-    page = wiki.upsert_individual_page(
-        title=title, body=body, user=user, change_type="ingest", source_ref_id=log.id
-    )
-    log.pages_affected = [page.id]
     ab.append_ingest_log(log)
-    wiki.regenerate_index(scope, "individual", user.id, user.id)
-    return [page.title]
+    return [p.title for p in pages]
 
 
 # --------------------------------------------------------------- manual mode
@@ -82,7 +97,7 @@ class ManualSession:
     messages: list[dict] = field(default_factory=list)
     proposed_title: str | None = None
     proposed_body: str | None = None
-    diff: str | None = None
+    changeset: wiki.Changeset | None = None
 
 
 _sessions: dict[str, ManualSession] = {}
@@ -121,8 +136,10 @@ def discuss(session: ManualSession, user_message: str) -> str:
 
 
 def propose_page(session: ManualSession, user: User) -> ManualSession:
-    """Draft the page from source + discussion, and compute the diff shown
-    for approval (against the existing page if the title already exists)."""
+    """Draft the primary page from source + discussion, then build the full
+    multi-page changeset (cross-page updates + index) shown for review as
+    one unit (build spec: "must present a multi-page changeset as one
+    reviewable unit")."""
     session.messages.append(
         {
             "role": "user",
@@ -138,36 +155,45 @@ def propose_page(session: ManualSession, user: User) -> ManualSession:
     title, body = wiki.split_title(draft)
     session.proposed_title, session.proposed_body = title, body
 
-    scope = make_partition_key("individual", user.id)
-    existing = ab.find_page_by_title(title, scope)
-    session.diff = wiki.unified_diff(existing.body if existing else "", body, title)
+    schema_ctx = schema.context_block("individual", user.id)
+    source_ref_id = _store_raw_source(session.source, user)
+    session.changeset = wiki.build_changeset(
+        tier="individual",
+        owner=user.id,
+        user=user,
+        primary_title=title,
+        primary_body=body,
+        log_source_type=session.source.source_type,
+        log_source_ref=source_ref_id,
+        log_mode="manual",
+        schema_ctx=schema_ctx,
+        source_ref_id=source_ref_id,
+    )
     return session
 
 
-def approve(session: ManualSession, user: User) -> list[str]:
-    """On approval: write page, update index, append log entry."""
-    assert session.proposed_title and session.proposed_body is not None
+def approve(session: ManualSession, user: User, selected: set[int] | None) -> list[str]:
+    """On approval: write the selected changeset items (None = approve-all,
+    empty set = reject-all handled by the caller before reaching here) and
+    append one ingest log entry covering every page actually written."""
+    assert session.changeset is not None
     scope = make_partition_key("individual", user.id)
-    log = IngestLogEntry(
-        partition_key=scope,
-        source_type=session.source.source_type,
-        source_ref=_store_raw_source(session.source, user),
-        mode="manual",
-        tier="individual",
-    )
-    page = wiki.upsert_individual_page(
-        title=session.proposed_title,
-        body=session.proposed_body,
-        user=user,
-        change_type="ingest",
-        source_ref_id=log.id,
-    )
-    log.pages_affected = [page.id]
-    ab.append_ingest_log(log)
-    wiki.regenerate_index(scope, "individual", user.id, user.id)
+    pages = wiki.apply_changeset(session.changeset, selected, user.id)
+    if pages:
+        log = IngestLogEntry(
+            partition_key=scope,
+            source_type=session.changeset.log_source_type,
+            source_ref=session.changeset.log_source_ref,
+            mode="manual",
+            tier="individual",
+            pages_affected=[p.id for p in pages],
+        )
+        ab.append_ingest_log(log)
     _sessions.pop(session.id, None)
-    return [page.title]
+    return [p.title for p in pages]
 
 
 def discard(session_id: str) -> None:
-    _sessions.pop(session_id, None)
+    session = _sessions.pop(session_id, None)
+    if session and session.changeset:
+        wiki.discard_changeset(session.changeset.id)

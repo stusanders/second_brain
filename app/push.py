@@ -1,8 +1,16 @@
 """Push / merge mechanism (individual -> team) with the two-stage conflict
-check. Nothing is written until the pusher confirms the preview."""
+check. Nothing is written until the pusher confirms the changeset review.
 
-import uuid
-from dataclasses import dataclass, field
+Placement (append vs. new page) and conflict detection stay push-specific;
+the resulting proposal is handed to wiki.build_changeset so push shares the
+same multi-page changeset review component as ingest and query-save (build
+spec: "Diff/review UI ... used for manual-mode ingest approval, push-to-team
+confirmation, query-derived page saves"). Cross-page updates are switched
+off here (`include_cross_page=False`): push already ran its own placement
+step to pick one target page, and the build spec's breadth requirement
+("10-15 pages is normal for one source") is stated for ingest, not push —
+this is a deliberate narrowing, not an oversight.
+"""
 
 from app import abstractions as ab
 from app import wiki
@@ -22,22 +30,7 @@ CONFLICT_SYSTEM = (
 )
 
 
-@dataclass
-class PushPreview:
-    id: str
-    user_id: str
-    team_id: str
-    source_page: Page
-    target_title: str
-    is_new_page: bool
-    conflicts: list[str] = field(default_factory=list)
-    diff: str = ""
-
-
-_previews: dict[str, PushPreview] = {}
-
-
-def prepare_push(page: Page, team_id: str, user: User) -> PushPreview:
+def prepare_push(page: Page, team_id: str, user: User) -> wiki.Changeset:
     scope = make_partition_key("team", team_id)
 
     # Stage 0: LLM decides placement — append to a related page or create new.
@@ -51,11 +44,11 @@ def prepare_push(page: Page, team_id: str, user: User) -> PushPreview:
             max_tokens=50,
         ).strip()
         if answer.upper().startswith("APPEND:"):
-            target_title, is_new = answer.split(":", 1)[1].strip(), False
+            target_title = answer.split(":", 1)[1].strip()
         else:
-            target_title, is_new = answer.split(":", 1)[-1].strip() or page.title, True
+            target_title = answer.split(":", 1)[-1].strip() or page.title
     else:
-        target_title, is_new = page.title, True
+        target_title = page.title
 
     # Two-stage conflict check: vector shortlist (cheap) -> LLM pass per
     # shortlisted page (expensive, scoped down). Never O(n^2).
@@ -77,56 +70,45 @@ def prepare_push(page: Page, team_id: str, user: User) -> PushPreview:
                 f"(updated {team_page.updated_at[:10]}): {desc}"
             )
 
-    existing = None if is_new else ab.find_page_by_title(target_title, scope)
-    preview = PushPreview(
-        id=uuid.uuid4().hex,
-        user_id=user.id,
-        team_id=team_id,
-        source_page=page,
-        target_title=target_title,
-        is_new_page=existing is None,
-        conflicts=conflicts,
-    )
-    appended = (existing.body if existing else "") + f"\n\n---\n\n### Pushed by {user.name}\n\n"
-    if conflicts:
-        appended += "".join(f"> **Note:** {c}\n" for c in conflicts) + "\n"
-    appended += page.body
-    preview.diff = wiki.unified_diff(existing.body if existing else "", appended, target_title)
-    _previews[preview.id] = preview
-    return preview
-
-
-def get_preview(preview_id: str, user: User) -> PushPreview | None:
-    p = _previews.get(preview_id)
-    return p if p and p.user_id == user.id else None
-
-
-def confirm_push(preview: PushPreview, user: User) -> Page:
-    """Pusher confirmed (go decision on any flagged conflicts). Conflict notes
-    are written INTO the appended content so future readers see the tension."""
-    scope = make_partition_key("team", preview.team_id)
-    log = IngestLogEntry(
-        partition_key=scope,
-        source_type="push",
-        source_ref=f"individual page: {preview.source_page.title}",
-        mode="manual",
+    note = "; ".join(conflicts) if conflicts else None
+    changeset = wiki.build_changeset(
         tier="team",
-    )
-    note = "; ".join(preview.conflicts) if preview.conflicts else None
-    page = wiki.append_to_team_page(
-        title=preview.target_title,
-        content=preview.source_page.body,
-        team_id=preview.team_id,
+        owner=team_id,
         user=user,
+        primary_title=target_title,
+        primary_body=page.body,
+        log_source_type="push",
+        log_source_ref=f"individual page: {page.title}",
+        log_mode="manual",
         conflict_note=note,
-        source_ref_id=log.id,
+        include_cross_page=False,
     )
-    log.pages_affected = [page.id]
-    ab.append_ingest_log(log)
-    wiki.regenerate_index(scope, "team", preview.team_id, user.id)
-    _previews.pop(preview.id, None)
-    return page
+    changeset.conflicts = conflicts
+    return changeset
 
 
-def discard_preview(preview_id: str) -> None:
-    _previews.pop(preview_id, None)
+def get_changeset(changeset_id: str, user: User) -> wiki.Changeset | None:
+    return wiki.get_changeset(changeset_id, user)
+
+
+def confirm_push(changeset: wiki.Changeset, user: User, selected: set[int] | None) -> list[Page]:
+    """Pusher confirmed (go decision on any flagged conflicts). Conflict notes
+    were already written INTO the appended content at build time, so future
+    readers see the tension regardless of which items end up selected."""
+    scope = make_partition_key("team", changeset.owner)
+    pages = wiki.apply_changeset(changeset, selected, user.id)
+    if pages:
+        log = IngestLogEntry(
+            partition_key=scope,
+            source_type=changeset.log_source_type,
+            source_ref=changeset.log_source_ref,
+            mode="manual",
+            tier="team",
+            pages_affected=[p.id for p in pages],
+        )
+        ab.append_ingest_log(log)
+    return pages
+
+
+def discard_changeset(changeset_id: str) -> None:
+    wiki.discard_changeset(changeset_id)

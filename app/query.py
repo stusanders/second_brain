@@ -2,13 +2,12 @@
 
 Ask a question against a scope's wiki, get a synthesized answer with
 citations back to the pages that fed it. The answer can be filed back into
-the wiki as a new page — same diff-review flow as ingest, logged with a
-distinct IngestLog source_type (`query_derived`) so it's traceable as
-synthesis rather than source-derived. Save drafts held in process memory,
-same tradeoff as manual-mode ingest sessions (see app.ingest.pipeline).
+the wiki as a new page — same multi-page changeset review flow as ingest
+(build spec: "same diff-review flow as ingest, same cross-page update
+logic"), logged with a distinct IngestLog source_type (`query_derived`) so
+it's traceable as synthesis rather than source-derived.
 """
 
-import uuid
 from dataclasses import dataclass, field
 
 from app import abstractions as ab
@@ -39,21 +38,6 @@ class QueryAnswer:
     sources: list[dict] = field(default_factory=list)  # [{page_id, title, score}]
 
 
-@dataclass
-class QuerySaveDraft:
-    id: str
-    user_id: str
-    tier: str
-    owner: str
-    question: str
-    proposed_title: str
-    proposed_body: str  # includes the query_derived frontmatter block
-    diff: str
-
-
-_drafts: dict[str, QuerySaveDraft] = {}
-
-
 def ask(question: str, tier: str, owner: str) -> QueryAnswer:
     scope = make_partition_key(tier, owner)  # type: ignore[arg-type]
     context = ab.get_context(question, scope)
@@ -68,12 +52,15 @@ def _frontmatter(question: str) -> str:
     return f'---\nquery_derived: true\nquestion: "{escaped}"\n---\n\n'
 
 
-def prepare_save(qa: QueryAnswer, user: User) -> QuerySaveDraft:
-    """Draft a standalone page from the Q&A and compute its diff — same
-    review step as an ingest proposal, just a different origin."""
+def prepare_save(qa: QueryAnswer, user: User) -> wiki.Changeset:
+    """Draft a standalone page from the Q&A, then build the same multi-page
+    changeset ingest uses (cross-page updates + index) — the build spec
+    calls for "same diff-review flow as ingest, same cross-page update
+    logic" for query-derived saves, not just a single-page diff."""
+    schema_ctx = schema.context_block(qa.tier, qa.owner)
     draft = ab.call_model(
         f"Question: {qa.question}\n\nAnswer:\n{qa.answer}",
-        system=SAVE_SYSTEM + "\n\n" + schema.context_block(qa.tier, qa.owner),
+        system=SAVE_SYSTEM + "\n\n" + schema_ctx,
         max_tokens=1500,
     )
     title, body = wiki.split_title(draft)
@@ -81,63 +68,41 @@ def prepare_save(qa: QueryAnswer, user: User) -> QuerySaveDraft:
         title = qa.question.strip().rstrip("?").capitalize()
     body = _frontmatter(qa.question) + body
 
-    scope = make_partition_key(qa.tier, qa.owner)  # type: ignore[arg-type]
-    existing = ab.find_page_by_title(title, scope)
-    diff = wiki.unified_diff(existing.body if existing else "", body, title)
-
-    d = QuerySaveDraft(
-        id=uuid.uuid4().hex,
-        user_id=user.id,
+    return wiki.build_changeset(
         tier=qa.tier,
         owner=qa.owner,
-        question=qa.question,
-        proposed_title=title,
-        proposed_body=body,
-        diff=diff,
+        user=user,
+        primary_title=title,
+        primary_body=body,
+        log_source_type="query_derived",
+        log_source_ref=f"query: {qa.question}",
+        log_mode="manual",
+        schema_ctx=schema_ctx,
     )
-    _drafts[d.id] = d
-    return d
 
 
-def get_draft(draft_id: str, user: User) -> QuerySaveDraft | None:
-    d = _drafts.get(draft_id)
-    return d if d and d.user_id == user.id else None
+def get_changeset(changeset_id: str, user: User) -> wiki.Changeset | None:
+    return wiki.get_changeset(changeset_id, user)
 
 
-def approve(draft: QuerySaveDraft, user: User) -> Page:
-    """Write the drafted page (in-place rewrite for individual, bottom-append
-    for team — same edit rule each tier already enforces for ingest), log it
-    as query_derived, and regenerate the index."""
-    scope = make_partition_key(draft.tier, draft.owner)  # type: ignore[arg-type]
-    log = IngestLogEntry(
-        partition_key=scope,
-        source_type="query_derived",
-        source_ref=f"query: {draft.question}",
-        mode="manual",
-        tier=draft.tier,  # type: ignore[arg-type]
-    )
-    if draft.tier == "individual":
-        page = wiki.upsert_individual_page(
-            title=draft.proposed_title,
-            body=draft.proposed_body,
-            user=user,
-            change_type="ingest",
-            source_ref_id=log.id,
+def approve(changeset: wiki.Changeset, user: User, selected: set[int] | None) -> list[Page]:
+    """Write the selected changeset items (in-place rewrite for individual,
+    bottom-append for team — same edit rule each tier already enforces for
+    ingest) and log the write as query_derived."""
+    scope = make_partition_key(changeset.tier, changeset.owner)  # type: ignore[arg-type]
+    pages = wiki.apply_changeset(changeset, selected, user.id)
+    if pages:
+        log = IngestLogEntry(
+            partition_key=scope,
+            source_type=changeset.log_source_type,
+            source_ref=changeset.log_source_ref,
+            mode="manual",
+            tier=changeset.tier,  # type: ignore[arg-type]
+            pages_affected=[p.id for p in pages],
         )
-    else:
-        page = wiki.append_to_team_page(
-            title=draft.proposed_title,
-            content=draft.proposed_body,
-            team_id=draft.owner,
-            user=user,
-            source_ref_id=log.id,
-        )
-    log.pages_affected = [page.id]
-    ab.append_ingest_log(log)
-    wiki.regenerate_index(scope, draft.tier, draft.owner, user.id)
-    _drafts.pop(draft.id, None)
-    return page
+        ab.append_ingest_log(log)
+    return pages
 
 
-def discard(draft_id: str) -> None:
-    _drafts.pop(draft_id, None)
+def discard(changeset_id: str) -> None:
+    wiki.discard_changeset(changeset_id)

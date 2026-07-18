@@ -1,0 +1,41 @@
+<!-- Multi-page changeset review (build spec: "must present a multi-page
+     changeset as one reviewable unit ... default to showing the full set
+     collapsed with per-page summaries"). Shared by manual ingest approval,
+     push-to-team confirmation, and query-derived saves.
+     Expected context vars: changeset, approve_all_url, approve_selected_url,
+     reject_url. -->
+{% if changeset.conflicts %}
+  <div class="card" style="border-color:#c77">
+    <h3>Possible conflicts flagged</h3>
+    <ul>{% for c in changeset.conflicts %}<li>{{ c }}</li>{% endfor %}</ul>
+    <p class="muted">Approving anyway writes these notes into the appended content so future
+       readers see the tension. Your call — go / no-go.</p>
+  </div>
+{% endif %}
+
+<p class="muted">{{ changeset.items|length }} page{{ "s" if changeset.items|length != 1 else "" }}
+  affected. Expand any to see its full diff; uncheck any you don't want written.</p>
+
+<form id="csform" method="post" action="{{ approve_selected_url }}"></form>
+
+{% for item in changeset.items %}
+<div class="card">
+  <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+    <input type="checkbox" name="selected" value="{{ loop.index0 }}" checked form="csform">
+    <strong>{{ item.title }}</strong>
+    <span class="muted">— {% if item.is_new %}new page, {% endif %}{{ item.summary }}</span>
+  </label>
+  <details style="margin-top:.5rem">
+    <summary class="muted">diff</summary>
+    <pre class="diff">{{ item.diff }}</pre>
+  </details>
+</div>
+{% endfor %}
+
+<p>
+  <button type="submit" form="csform" formaction="{{ approve_all_url }}">Approve all</button>
+  <button type="submit" form="csform">Approve selected</button>
+</p>
+<form method="post" action="{{ reject_url }}" style="display:inline">
+  <button type="submit" class="secondary">Reject all</button>
+</form>

@@ -23,10 +23,13 @@
     <button type="submit">Run lint now</button>
   </form>
 </div>
-<p class="muted">Manual: flags and proposes, nothing auto-fixed. Automatic: mechanical findings
-   (missing cross-refs, stub pages, orphan flags) apply with no review gate on the individual
-   tier; judgment findings (contradictions, staleness, data gaps) always queue for review here,
-   on both tiers.</p>
+<p class="muted">Manual: flags and proposes, nothing auto-fixed. Automatic: on the individual
+   tier, all mechanical findings (missing cross-refs, stub pages, orphan flags) apply with no
+   review gate. On the team tier, only missing cross-references apply automatically — and never
+   by editing the append log, only by regenerating the mentioning page's
+   <a href="/{{ tier }}/{{ owner }}/">current-view synthesis</a>; orphan and stub findings still
+   queue for manual review there. Judgment findings (contradictions, staleness, data gaps) always
+   queue for review here, on both tiers.</p>
 
 {% if findings %}
   {% for f in findings %}
@@ -41,7 +44,7 @@
       {% endfor %}
     </p>
     {% endif %}
-    {% if f.category == "mechanical" and tier != "team" %}
+    {% if f.category == "mechanical" and (tier != "team" or f.check_type == "missing_xref") %}
     <form method="post" action="/{{ tier }}/{{ owner }}/lint/{{ f.id }}/apply" style="display:inline">
       <button type="submit">Apply</button>
     </form>

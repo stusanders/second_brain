@@ -19,7 +19,7 @@
   </div>
 {% endfor %}
 
-{% if session.diff is none %}
+{% if session.changeset is none %}
   <form method="post" action="/manual/{{ session.id }}/message">
     <p><textarea name="message" rows="3" placeholder="Discuss the takeaways…" required></textarea></p>
     <button type="submit">Send</button>
@@ -28,16 +28,12 @@
     <button type="submit" class="secondary">Done discussing — draft the page</button>
   </form>
 {% else %}
-  <h2>Proposed: {{ session.proposed_title }}</h2>
-  <pre class="diff">{{ session.diff }}</pre>
-  <form method="post" action="/manual/{{ session.id }}/approve" style="display:inline">
-    <button type="submit">Approve &amp; write</button>
-  </form>
-  <form method="post" action="/manual/{{ session.id }}/message" style="display:inline">
-    <input type="hidden" name="message" value="Let's revise — see my next message.">
-  </form>
-  <form method="post" action="/manual/{{ session.id }}/discard" style="display:inline">
-    <button type="submit" class="secondary">Discard</button>
-  </form>
+  <h2>Proposed changeset</h2>
+  {% with changeset=session.changeset,
+     approve_all_url="/manual/" ~ session.id ~ "/approve-all",
+     approve_selected_url="/manual/" ~ session.id ~ "/approve-selected",
+     reject_url="/manual/" ~ session.id ~ "/discard" %}
+    {% include "changeset.html" %}
+  {% endwith %}
 {% endif %}
 {% endblock %}

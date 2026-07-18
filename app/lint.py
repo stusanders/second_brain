@@ -11,12 +11,17 @@ kinds, per spec:
     wrong writes a confident falsehood future syntheses build on.
 
 Team-tier constraint: automatic lint may only regenerate derived views and
-add cross-references, never touch the append-only log. This build has not
-yet implemented the derived-current-view layer (see README "Not yet
-built"), so automatic lint on the team tier records every mechanical
-finding as flagged-only (no content mutation) rather than guessing at a
-derived-view write path that doesn't exist yet — a deliberate, flagged
-simplification, not a silent gap.
+add cross-references, never touch the append-only log. With
+`app.derived_views` now built, automatic team-tier lint resolves
+`missing_xref` findings by regenerating that page's derived view (the
+synthesis step adds the [[wikilink]] there, never in the log itself) and
+also uses each automatic pass as the "regenerated on a schedule" cadence
+the build spec calls for (bounded — see MAX_DERIVED_VIEW_PAGES — since this
+POC has no background scheduler; a lint pass is the closest thing to one).
+`orphan` and `stub_candidate` still have no team-tier fix — creating a new
+page or resolving an orphan isn't "regenerate a derived view or add a
+cross-reference", so those stay queued for manual review on team tier
+regardless of lint mode, same as before.
 
 Findings persist as a JSON blob per scope (not a new Cosmos container —
 adding one would require another by-hand Azure Portal step per
@@ -30,7 +35,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Literal
 
 from app import abstractions as ab
-from app import blob_store, schema, wiki
+from app import blob_store, derived_views, schema, wiki
 from app.models import User, make_partition_key, new_id, now_iso
 
 FindingCategory = Literal["mechanical", "judgment"]
@@ -46,6 +51,9 @@ MECHANICAL_CHECKS: frozenset[CheckType] = frozenset({"orphan", "missing_xref", "
 # wiki they scan per run rather than growing unbounded with wiki size.
 MAX_JUDGMENT_PAGES = 15
 MAX_STRUCTURAL_PAGES = 200
+# Team-tier automatic lint doubles as the derived-view regen "schedule" (no
+# background scheduler in this POC) — bound per run for the same reason.
+MAX_DERIVED_VIEW_PAGES = 15
 
 CONFLICT_STALE_SYSTEM = (
     "You check two pages from the same knowledge wiki for problems. Answer with "
@@ -339,9 +347,18 @@ def _find_data_gaps(scope: str, schema_ctx: str) -> list[LintFinding]:
 
 
 def _apply_mechanical(scope: str, tier: str, owner: str, f: LintFinding, author_id: str) -> None:
-    """Perform the concrete fix a mechanical finding proposes. Team tier is
-    deliberately excluded (see module docstring) — flagged, not mutated."""
+    """Perform the concrete fix a mechanical finding proposes.
+
+    Team tier: only `missing_xref` has a fix path, and it never touches the
+    append log — it regenerates the mentioning page's derived view instead
+    (the synthesis step adds the [[wikilink]] there). `orphan` and
+    `stub_candidate` have no team-tier fix (see module docstring) and are
+    no-ops here."""
     if tier == "team":
+        if f.check_type == "missing_xref" and f.page_ids:
+            page = ab.read_page(f.page_ids[0], scope)
+            if page:
+                derived_views.regenerate_derived_view(page, schema.context_block(tier, owner))
         return
     if f.check_type == "missing_xref" and len(f.page_ids) == 2:
         page = ab.read_page(f.page_ids[0], scope)
@@ -373,15 +390,14 @@ def apply_finding(tier: str, owner: str, finding_id: str, user: User) -> None:
     apply its fix now. Judgment findings have no auto-fix — approving one
     just acknowledges it (see run_lint docstring: deciding *how* to resolve
     a contradiction or staleness call is the human's job, not automated
-    here). Team-tier mechanical findings have no fix path yet either (see
-    module docstring) — apply is a no-op there; only dismiss is meaningful,
-    which the UI enforces by not offering Apply on team-tier mechanical
-    findings."""
+    here). Team-tier `orphan`/`stub_candidate` findings still have no fix
+    path (see `_apply_mechanical`) — apply is a no-op there; only dismiss is
+    meaningful, which the UI enforces by not offering Apply on those."""
     scope = make_partition_key(tier, owner)  # type: ignore[arg-type]
     f = get_finding(tier, owner, finding_id)
     if not f:
         return
-    if f.category == "mechanical" and tier == "team":
+    if f.category == "mechanical" and tier == "team" and f.check_type != "missing_xref":
         return
     if f.category == "mechanical":
         _apply_mechanical(scope, tier, owner, f, user.id)
@@ -395,9 +411,15 @@ def dismiss_finding(tier: str, owner: str, finding_id: str) -> None:
 
 def run_lint(tier: str, owner: str, mode: LintMode, user: User) -> dict:
     """Run every check, then either apply mechanical findings directly
-    (automatic mode, individual tier only — see module docstring for the
-    team-tier deferral) or queue everything for review (manual mode, or any
-    judgment finding regardless of mode)."""
+    (automatic mode) or queue everything for review (manual mode, or any
+    judgment finding regardless of mode).
+
+    Automatic mode, team tier: `missing_xref` findings are applied via
+    derived-view regeneration (never the log); `orphan`/`stub_candidate`
+    still have no fix path and stay queued. This run also doubles as the
+    build spec's "regenerated on a schedule" cadence for derived views —
+    bounded to MAX_DERIVED_VIEW_PAGES pages per pass, prioritizing pages a
+    missing_xref finding didn't already cover this run."""
     scope = make_partition_key(tier, owner)  # type: ignore[arg-type]
     schema_ctx = schema.context_block(tier, owner)
 
@@ -410,14 +432,35 @@ def run_lint(tier: str, owner: str, mode: LintMode, user: User) -> dict:
 
     applied = 0
     if mode == "automatic":
-        for f in mechanical:
-            if tier == "individual" and f.check_type != "orphan":
-                _apply_mechanical(scope, tier, owner, f, user.id)
-                f.status = "applied"
-                applied += 1
-            else:
-                f.status = "pending" if tier == "team" else "applied"
-        if applied:
+        if tier == "individual":
+            for f in mechanical:
+                if f.check_type != "orphan":
+                    _apply_mechanical(scope, tier, owner, f, user.id)
+                    f.status = "applied"
+                    applied += 1
+            if applied:
+                wiki.regenerate_index(scope, tier, owner, user.id)
+        else:  # team
+            regenerated_page_ids: set[str] = set()
+            for f in mechanical:
+                if f.check_type == "missing_xref":
+                    _apply_mechanical(scope, tier, owner, f, user.id)
+                    f.status = "applied"
+                    applied += 1
+                    if f.page_ids:
+                        regenerated_page_ids.add(f.page_ids[0])
+                # orphan / stub_candidate: no team-tier fix, stay pending.
+            remaining = MAX_DERIVED_VIEW_PAGES - len(regenerated_page_ids)
+            if remaining > 0:
+                for p in ab.list_pages(scope):
+                    if remaining <= 0:
+                        break
+                    if p.title == wiki.INDEX_TITLE or p.id in regenerated_page_ids:
+                        continue
+                    full = ab.read_page(p.id, scope)
+                    if full:
+                        derived_views.regenerate_derived_view(full, schema_ctx)
+                        remaining -= 1
             wiki.regenerate_index(scope, tier, owner, user.id)
 
     _append_findings(tier, owner, mechanical + judgment)

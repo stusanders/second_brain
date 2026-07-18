@@ -3,11 +3,11 @@ import uuid
 
 import markdown as md
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app import abstractions as ab
-from app import auth, lint, push, query, schema, wiki
+from app import auth, derived_views, lint, push, query, schema, wiki
 from app.ingest import extractors, pipeline
 from app.models import User, make_partition_key
 
@@ -121,6 +121,50 @@ def page_by_title(tier: str, owner: str, title: str, user: User = Depends(auth.c
     return RedirectResponse(f"/{tier}/{owner}/page/{page.id}")
 
 
+@app.get("/{tier}/{owner}/export")
+def export_wiki(tier: str, owner: str, user: User = Depends(auth.current_user)):
+    _scope_or_403(tier, owner, user)
+    archive = wiki.export_wiki(tier, owner)
+    return Response(
+        content=archive,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{tier}-{owner}-wiki-export.zip"'},
+    )
+
+
+@app.get("/team/{team_id}/derived/{slug}", response_class=HTMLResponse)
+def derived_view(
+    team_id: str, slug: str, request: Request, user: User = Depends(auth.current_user)
+):
+    _scope_or_403("team", team_id, user)
+    body = derived_views.read_derived_view(team_id, slug)
+    if body is None:
+        raise HTTPException(404, "No derived view yet for this page — run lint or regenerate it.")
+    return templates.TemplateResponse(
+        request,
+        "derived.html",
+        {
+            "user": user,
+            "team_id": team_id,
+            "slug": slug,
+            "html": render_markdown(body, "team", team_id),
+        },
+    )
+
+
+@app.post("/team/{team_id}/derived/{slug}/regenerate")
+def derived_view_regenerate(
+    team_id: str, slug: str, page_id: str = Form(...), user: User = Depends(auth.current_user)
+):
+    _scope_or_403("team", team_id, user)
+    scope = make_partition_key("team", team_id)
+    page = ab.read_page(page_id, scope)
+    if not page:
+        raise HTTPException(404, "Page not found.")
+    derived_views.regenerate_derived_view(page, schema.context_block("team", team_id))
+    return RedirectResponse(f"/team/{team_id}/derived/{slug}", status_code=303)
+
+
 @app.get("/{tier}/{owner}/log", response_class=HTMLResponse)
 def ingest_log(tier: str, owner: str, request: Request, user: User = Depends(auth.current_user)):
     scope = _scope_or_403(tier, owner, user)
@@ -213,12 +257,25 @@ def manual_propose(session_id: str, user: User = Depends(auth.current_user)):
     return RedirectResponse(f"/manual/{session_id}", status_code=303)
 
 
-@app.post("/manual/{session_id}/approve")
-def manual_approve(session_id: str, user: User = Depends(auth.current_user)):
+@app.post("/manual/{session_id}/approve-all")
+def manual_approve_all(session_id: str, user: User = Depends(auth.current_user)):
     session = pipeline.get_session(session_id, user)
     if not session:
         raise HTTPException(404)
-    pipeline.approve(session, user)
+    pipeline.approve(session, user, None)
+    return RedirectResponse(f"/individual/{user.id}/", status_code=303)
+
+
+@app.post("/manual/{session_id}/approve-selected")
+async def manual_approve_selected(
+    session_id: str, request: Request, user: User = Depends(auth.current_user)
+):
+    session = pipeline.get_session(session_id, user)
+    if not session:
+        raise HTTPException(404)
+    form = await request.form()
+    selected = {int(v) for v in form.getlist("selected")}
+    pipeline.approve(session, user, selected)
     return RedirectResponse(f"/individual/{user.id}/", status_code=303)
 
 
@@ -264,33 +321,56 @@ def query_save_prepare(
 ):
     _scope_or_403(tier, owner, user)
     qa = query.QueryAnswer(question=question, answer=answer, tier=tier, owner=owner)
-    draft = query.prepare_save(qa, user)
-    return RedirectResponse(f"/query/save/{draft.id}", status_code=303)
+    changeset = query.prepare_save(qa, user)
+    return RedirectResponse(f"/query/save/{changeset.id}", status_code=303)
 
 
-@app.get("/query/save/{draft_id}", response_class=HTMLResponse)
-def query_save_preview(draft_id: str, request: Request, user: User = Depends(auth.current_user)):
-    draft = query.get_draft(draft_id, user)
-    if not draft:
-        raise HTTPException(404, "Draft not found (it may have expired).")
-    return templates.TemplateResponse(request, "query_save.html", {"user": user, "draft": draft})
+@app.get("/query/save/{changeset_id}", response_class=HTMLResponse)
+def query_save_preview(
+    changeset_id: str, request: Request, user: User = Depends(auth.current_user)
+):
+    changeset = query.get_changeset(changeset_id, user)
+    if not changeset:
+        raise HTTPException(404, "Changeset not found (it may have expired).")
+    return templates.TemplateResponse(
+        request, "query_save.html", {"user": user, "changeset": changeset}
+    )
 
 
-@app.post("/query/save/{draft_id}/approve")
-def query_save_approve(draft_id: str, user: User = Depends(auth.current_user)):
-    draft = query.get_draft(draft_id, user)
-    if not draft:
+@app.post("/query/save/{changeset_id}/approve-all")
+def query_save_approve_all(changeset_id: str, user: User = Depends(auth.current_user)):
+    changeset = query.get_changeset(changeset_id, user)
+    if not changeset:
         raise HTTPException(404)
-    page = query.approve(draft, user)
-    return RedirectResponse(f"/{draft.tier}/{draft.owner}/page/{page.id}", status_code=303)
+    pages = query.approve(changeset, user, None)
+    dest = pages[0] if pages else None
+    if dest:
+        return RedirectResponse(f"/{changeset.tier}/{changeset.owner}/page/{dest.id}", 303)
+    return RedirectResponse(f"/{changeset.tier}/{changeset.owner}/query", status_code=303)
 
 
-@app.post("/query/save/{draft_id}/discard")
-def query_save_discard(draft_id: str, user: User = Depends(auth.current_user)):
-    draft = query.get_draft(draft_id, user)
-    if draft:
-        query.discard(draft_id)
-        return RedirectResponse(f"/{draft.tier}/{draft.owner}/query", status_code=303)
+@app.post("/query/save/{changeset_id}/approve-selected")
+async def query_save_approve_selected(
+    changeset_id: str, request: Request, user: User = Depends(auth.current_user)
+):
+    changeset = query.get_changeset(changeset_id, user)
+    if not changeset:
+        raise HTTPException(404)
+    form = await request.form()
+    selected = {int(v) for v in form.getlist("selected")}
+    pages = query.approve(changeset, user, selected)
+    dest = pages[0] if pages else None
+    if dest:
+        return RedirectResponse(f"/{changeset.tier}/{changeset.owner}/page/{dest.id}", 303)
+    return RedirectResponse(f"/{changeset.tier}/{changeset.owner}/query", status_code=303)
+
+
+@app.post("/query/save/{changeset_id}/discard")
+def query_save_discard(changeset_id: str, user: User = Depends(auth.current_user)):
+    changeset = query.get_changeset(changeset_id, user)
+    if changeset:
+        query.discard(changeset_id)
+        return RedirectResponse(f"/{changeset.tier}/{changeset.owner}/query", status_code=303)
     return RedirectResponse("/", status_code=303)
 
 
@@ -305,30 +385,49 @@ def push_prepare(
     page = ab.read_page(page_id, make_partition_key("individual", user.id))
     if not page:
         raise HTTPException(404, "Page not found in your individual wiki.")
-    preview = push.prepare_push(page, team_id, user)
-    return RedirectResponse(f"/push/{preview.id}", status_code=303)
+    changeset = push.prepare_push(page, team_id, user)
+    return RedirectResponse(f"/push/{changeset.id}", status_code=303)
 
 
-@app.get("/push/{preview_id}", response_class=HTMLResponse)
-def push_preview(preview_id: str, request: Request, user: User = Depends(auth.current_user)):
-    preview = push.get_preview(preview_id, user)
-    if not preview:
-        raise HTTPException(404, "Preview not found (it may have expired).")
-    return templates.TemplateResponse(request, "push.html", {"user": user, "preview": preview})
+@app.get("/push/{changeset_id}", response_class=HTMLResponse)
+def push_preview(changeset_id: str, request: Request, user: User = Depends(auth.current_user)):
+    changeset = push.get_changeset(changeset_id, user)
+    if not changeset:
+        raise HTTPException(404, "Changeset not found (it may have expired).")
+    return templates.TemplateResponse(request, "push.html", {"user": user, "changeset": changeset})
 
 
-@app.post("/push/{preview_id}/confirm")
-def push_confirm(preview_id: str, user: User = Depends(auth.current_user)):
-    preview = push.get_preview(preview_id, user)
-    if not preview:
+@app.post("/push/{changeset_id}/approve-all")
+def push_approve_all(changeset_id: str, user: User = Depends(auth.current_user)):
+    changeset = push.get_changeset(changeset_id, user)
+    if not changeset:
         raise HTTPException(404)
-    page = push.confirm_push(preview, user)
-    return RedirectResponse(f"/team/{preview.team_id}/page/{page.id}", status_code=303)
+    pages = push.confirm_push(changeset, user, None)
+    dest = pages[0] if pages else None
+    if dest:
+        return RedirectResponse(f"/team/{changeset.owner}/page/{dest.id}", status_code=303)
+    return RedirectResponse(f"/team/{changeset.owner}/", status_code=303)
 
 
-@app.post("/push/{preview_id}/discard")
-def push_discard(preview_id: str, user: User = Depends(auth.current_user)):
-    push.discard_preview(preview_id)
+@app.post("/push/{changeset_id}/approve-selected")
+async def push_approve_selected(
+    changeset_id: str, request: Request, user: User = Depends(auth.current_user)
+):
+    changeset = push.get_changeset(changeset_id, user)
+    if not changeset:
+        raise HTTPException(404)
+    form = await request.form()
+    selected = {int(v) for v in form.getlist("selected")}
+    pages = push.confirm_push(changeset, user, selected)
+    dest = pages[0] if pages else None
+    if dest:
+        return RedirectResponse(f"/team/{changeset.owner}/page/{dest.id}", status_code=303)
+    return RedirectResponse(f"/team/{changeset.owner}/", status_code=303)
+
+
+@app.post("/push/{changeset_id}/discard")
+def push_discard(changeset_id: str, user: User = Depends(auth.current_user)):
+    push.discard_changeset(changeset_id)
     return RedirectResponse("/", status_code=303)
 
 
