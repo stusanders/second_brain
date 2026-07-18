@@ -21,4 +21,5 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
       - run: uv sync --extra dev
-      - run: uv run pytest
+      # exit code 5 = no tests collected yet; treat as pass until a tests/ dir exists
+      - run: uv run pytest || [ $? -eq 5 ]
