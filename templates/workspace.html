@@ -32,7 +32,9 @@
       <p class="muted">No pages yet{% if tier == "individual" %} — drop a source to get started{% endif %}.</p>
     {% endif %}
     <p><a href="/{{ tier }}/{{ owner }}/query">Ask a question</a> ·
-       <a href="/{{ tier }}/{{ owner }}/log">Ingest log</a></p>
+       <a href="/{{ tier }}/{{ owner }}/log">Ingest log</a> ·
+       <a href="/{{ tier }}/{{ owner }}/schema">Schema doc</a> ·
+       <a href="/{{ tier }}/{{ owner }}/lint">Lint queue{% if lint_counts.total %} ({{ lint_counts.total }}){% endif %}</a></p>
   </div>
 
   {% if tier == "individual" %}

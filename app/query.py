@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from app import abstractions as ab
-from app import wiki
+from app import schema, wiki
 from app.models import IngestLogEntry, Page, User, make_partition_key
 
 ANSWER_SYSTEM = (
@@ -57,7 +57,8 @@ _drafts: dict[str, QuerySaveDraft] = {}
 def ask(question: str, tier: str, owner: str) -> QueryAnswer:
     scope = make_partition_key(tier, owner)  # type: ignore[arg-type]
     context = ab.get_context(question, scope)
-    answer = ab.call_model(question, context=context, system=ANSWER_SYSTEM, max_tokens=900)
+    system = ANSWER_SYSTEM + "\n\n" + schema.context_block(tier, owner)
+    answer = ab.call_model(question, context=context, system=system, max_tokens=900)
     sources = ab.search(question, scope, top_k=5)
     return QueryAnswer(question=question, answer=answer, tier=tier, owner=owner, sources=sources)
 
@@ -72,7 +73,7 @@ def prepare_save(qa: QueryAnswer, user: User) -> QuerySaveDraft:
     review step as an ingest proposal, just a different origin."""
     draft = ab.call_model(
         f"Question: {qa.question}\n\nAnswer:\n{qa.answer}",
-        system=SAVE_SYSTEM,
+        system=SAVE_SYSTEM + "\n\n" + schema.context_block(qa.tier, qa.owner),
         max_tokens=1500,
     )
     title, body = wiki.split_title(draft)

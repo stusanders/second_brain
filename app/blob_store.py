@@ -71,13 +71,26 @@ def read_text(path: str) -> str | None:
 
 def list_page_paths(tier: str, owner_id: str) -> list[str]:
     """All top-level page blobs (not version snapshots) for a scope — the
-    reindex() recovery path walks this to rebuild the Cosmos index."""
+    reindex() recovery path walks this to rebuild the Cosmos index.
+
+    Names starting with "_" are reserved for app metadata (e.g. _schema.md,
+    _lint/queue.json) and excluded — they are not wiki pages and must never
+    be swept into the page index."""
     prefix = f"{tier}/{owner_id}/"
     return [
         b.name
         for b in _wiki_container().list_blobs(name_starts_with=prefix)
-        if b.name.endswith(".md") and "/" not in b.name[len(prefix) :]
+        if b.name.endswith(".md")
+        and "/" not in b.name[len(prefix) :]
+        and not b.name[len(prefix) :].startswith("_")
     ]
+
+
+def list_paths(prefix: str) -> list[str]:
+    """All blob names under a prefix, any depth — used for app-metadata
+    blobs (schema doc version snapshots, lint queue) that live outside the
+    page-listing convention above."""
+    return [b.name for b in _wiki_container().list_blobs(name_starts_with=prefix)]
 
 
 # ------------------------------------------------------------ concurrency

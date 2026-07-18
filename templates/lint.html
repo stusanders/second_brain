@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Lint queue{% endblock %}
+{% block content %}
+<p class="muted"><a href="/{{ tier }}/{{ owner }}/">&larr; back to wiki</a></p>
+<h1>Lint queue</h1>
+
+<p class="muted">
+  Unreviewed: <strong>{{ counts.total }}</strong> ·
+  <a href="/{{ tier }}/{{ owner }}/lint?origin=automatic">automatic: {{ counts.automatic }}</a> ·
+  <a href="/{{ tier }}/{{ owner }}/lint?origin=manual">manual: {{ counts.manual }}</a> ·
+  <a href="/{{ tier }}/{{ owner }}/lint?origin=n/a">n/a: {{ counts["n/a"] }}</a>
+  {% if origin %} · <a href="/{{ tier }}/{{ owner }}/lint">clear filter</a>{% endif %}
+</p>
+
+<div class="cols">
+  <form method="post" action="/{{ tier }}/{{ owner }}/lint/mode">
+    <input type="hidden" name="mode" value="{{ 'manual' if lint_mode == 'automatic' else 'automatic' }}">
+    <button type="submit" class="secondary">
+      Lint mode: {{ lint_mode }} (click to switch to {{ 'manual' if lint_mode == 'automatic' else 'automatic' }})
+    </button>
+  </form>
+  <form method="post" action="/{{ tier }}/{{ owner }}/lint/run">
+    <button type="submit">Run lint now</button>
+  </form>
+</div>
+<p class="muted">Manual: flags and proposes, nothing auto-fixed. Automatic: mechanical findings
+   (missing cross-refs, stub pages, orphan flags) apply with no review gate on the individual
+   tier; judgment findings (contradictions, staleness, data gaps) always queue for review here,
+   on both tiers.</p>
+
+{% if findings %}
+  {% for f in findings %}
+  <div class="card">
+    <p class="muted">{{ f.category }} · {{ f.check_type }} · origin: {{ f.origin_mode }}</p>
+    <p><strong>{{ f.summary }}</strong></p>
+    <p>{{ f.detail }}</p>
+    {% if f.page_ids %}
+    <p class="muted">Pages:
+      {% for pid in f.page_ids %}
+        <a href="/{{ tier }}/{{ owner }}/page/{{ pid }}">{{ pid[:8] }}</a>{{ ", " if not loop.last }}
+      {% endfor %}
+    </p>
+    {% endif %}
+    {% if f.category == "mechanical" and tier != "team" %}
+    <form method="post" action="/{{ tier }}/{{ owner }}/lint/{{ f.id }}/apply" style="display:inline">
+      <button type="submit">Apply</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/{{ tier }}/{{ owner }}/lint/{{ f.id }}/dismiss" style="display:inline">
+      <button type="submit" class="secondary">Dismiss</button>
+    </form>
+  </div>
+  {% endfor %}
+{% else %}
+  <p class="muted">Nothing pending. Run lint to check for contradictions, stale claims,
+     orphan pages, missing cross-references, and data gaps.</p>
+{% endif %}
+{% endblock %}

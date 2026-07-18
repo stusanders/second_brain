@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app import abstractions as ab
-from app import auth, push, query, wiki
+from app import auth, lint, push, query, schema, wiki
 from app.ingest import extractors, pipeline
 from app.models import User, make_partition_key
 
@@ -82,6 +82,7 @@ def workspace(
             "index_title": wiki.INDEX_TITLE,
             "q": q,
             "results": results,
+            "lint_counts": lint.unreviewed_counts(tier, owner),
         },
     )
 
@@ -156,6 +157,13 @@ async def ingest(
     if not sources:
         raise HTTPException(422, "Nothing to ingest.")
 
+    downgraded = False
+    if mode == "automatic" and not lint.is_automatic_ingest_allowed("individual", user.id):
+        # Threshold-triggered downgrade (build spec): ingest capture itself
+        # is never blocked, only automatic mode — falls through to the
+        # manual-session flow below instead of a silent unattended write.
+        mode, downgraded = "manual", True
+
     if mode == "automatic":
         affected = []
         for source in sources:  # per-source, never combined
@@ -166,15 +174,23 @@ async def ingest(
     first = pipeline.start_manual_session(sources[0], user)
     for source in sources[1:]:
         pipeline.start_manual_session(source, user)
-    return RedirectResponse(f"/manual/{first.id}", status_code=303)
+    suffix = "?downgraded=1" if downgraded else ""
+    return RedirectResponse(f"/manual/{first.id}{suffix}", status_code=303)
 
 
 @app.get("/manual/{session_id}", response_class=HTMLResponse)
-def manual_session(session_id: str, request: Request, user: User = Depends(auth.current_user)):
+def manual_session(
+    session_id: str,
+    request: Request,
+    downgraded: bool = False,
+    user: User = Depends(auth.current_user),
+):
     session = pipeline.get_session(session_id, user)
     if not session:
         raise HTTPException(404, "Session not found (it may have expired).")
-    return templates.TemplateResponse(request, "manual.html", {"user": user, "session": session})
+    return templates.TemplateResponse(
+        request, "manual.html", {"user": user, "session": session, "downgraded": downgraded}
+    )
 
 
 @app.post("/manual/{session_id}/message")
@@ -314,3 +330,86 @@ def push_confirm(preview_id: str, user: User = Depends(auth.current_user)):
 def push_discard(preview_id: str, user: User = Depends(auth.current_user)):
     push.discard_preview(preview_id)
     return RedirectResponse("/", status_code=303)
+
+
+# ------------------------------------------------------------------ schema
+
+
+@app.get("/{tier}/{owner}/schema", response_class=HTMLResponse)
+def schema_edit(tier: str, owner: str, request: Request, user: User = Depends(auth.current_user)):
+    _scope_or_403(tier, owner, user)
+    return templates.TemplateResponse(
+        request,
+        "schema.html",
+        {"user": user, "tier": tier, "owner": owner, "body": schema.read_schema(tier, owner)},
+    )
+
+
+@app.post("/{tier}/{owner}/schema")
+def schema_save(
+    tier: str,
+    owner: str,
+    body: str = Form(...),
+    user: User = Depends(auth.current_user),
+):
+    _scope_or_403(tier, owner, user)
+    schema.write_schema(tier, owner, body)
+    return RedirectResponse(f"/{tier}/{owner}/schema", status_code=303)
+
+
+# -------------------------------------------------------------------- lint
+
+
+@app.get("/{tier}/{owner}/lint", response_class=HTMLResponse)
+def lint_queue(
+    tier: str,
+    owner: str,
+    request: Request,
+    origin: str = "",
+    user: User = Depends(auth.current_user),
+):
+    _scope_or_403(tier, owner, user)
+    findings = lint.list_findings(tier, owner, status="pending", origin_mode=origin or None)
+    return templates.TemplateResponse(
+        request,
+        "lint.html",
+        {
+            "user": user,
+            "tier": tier,
+            "owner": owner,
+            "lint_mode": lint.get_lint_mode(tier, owner),
+            "counts": lint.unreviewed_counts(tier, owner),
+            "findings": findings,
+            "origin": origin,
+        },
+    )
+
+
+@app.post("/{tier}/{owner}/lint/mode")
+def lint_set_mode(
+    tier: str, owner: str, mode: str = Form(...), user: User = Depends(auth.current_user)
+):
+    _scope_or_403(tier, owner, user)
+    lint.set_lint_mode(tier, owner, mode)  # type: ignore[arg-type]
+    return RedirectResponse(f"/{tier}/{owner}/lint", status_code=303)
+
+
+@app.post("/{tier}/{owner}/lint/run")
+def lint_run(tier: str, owner: str, user: User = Depends(auth.current_user)):
+    _scope_or_403(tier, owner, user)
+    lint.run_lint(tier, owner, lint.get_lint_mode(tier, owner), user)
+    return RedirectResponse(f"/{tier}/{owner}/lint", status_code=303)
+
+
+@app.post("/{tier}/{owner}/lint/{finding_id}/apply")
+def lint_apply(tier: str, owner: str, finding_id: str, user: User = Depends(auth.current_user)):
+    _scope_or_403(tier, owner, user)
+    lint.apply_finding(tier, owner, finding_id, user)
+    return RedirectResponse(f"/{tier}/{owner}/lint", status_code=303)
+
+
+@app.post("/{tier}/{owner}/lint/{finding_id}/dismiss")
+def lint_dismiss(tier: str, owner: str, finding_id: str, user: User = Depends(auth.current_user)):
+    _scope_or_403(tier, owner, user)
+    lint.dismiss_finding(tier, owner, finding_id)
+    return RedirectResponse(f"/{tier}/{owner}/lint", status_code=303)

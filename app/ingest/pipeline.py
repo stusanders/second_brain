@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from app import abstractions as ab
-from app import blob_store, wiki
+from app import blob_store, schema, wiki
 from app.ingest.extractors import ExtractedSource
 from app.models import IngestLogEntry, User, make_partition_key
 
@@ -51,7 +51,7 @@ def ingest_automatic(source: ExtractedSource, user: User) -> list[str]:
     draft = ab.call_model(
         "Summarize this source into a wiki page.",
         context=source.text,
-        system=SUMMARY_SYSTEM,
+        system=SUMMARY_SYSTEM + "\n\n" + schema.context_block("individual", user.id),
     )
     title, body = wiki.split_title(draft)
 
@@ -93,7 +93,12 @@ def start_manual_session(source: ExtractedSource, user: User) -> ManualSession:
     session.messages = [
         {
             "role": "system",
-            "content": DISCUSSION_SYSTEM + "\n\n<source>\n" + source.text + "\n</source>",
+            "content": DISCUSSION_SYSTEM
+            + "\n\n"
+            + schema.context_block("individual", user.id)
+            + "\n\n<source>\n"
+            + source.text
+            + "\n</source>",
         },
         {"role": "user", "content": "I've just dropped this source. What did you find notable?"},
     ]

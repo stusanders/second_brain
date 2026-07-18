@@ -3,6 +3,14 @@
 {% block content %}
 <h1>Manual ingest: {{ session.source.source_ref }}</h1>
 <p class="muted">{{ session.source.source_type }} · discussion before anything is written</p>
+{% if downgraded %}
+<div class="card" style="border-color:#c77">
+  <p>Automatic mode was requested but downgraded to manual for this drop: too many
+     automatic-ingest-derived findings are sitting unreviewed in your lint queue.
+     Work through the <a href="/individual/{{ session.user_id }}/lint">lint queue</a> to
+     re-enable automatic ingest.</p>
+</div>
+{% endif %}
 
 {% for m in session.messages if m.role != "system" %}
   <div class="card">
