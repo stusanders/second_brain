@@ -13,12 +13,23 @@ class Settings(BaseSettings):
     entra_client_secret: str = ""
     oauth_redirect_uri: str = "http://localhost:8000/auth/callback"
 
-    # Azure OpenAI
+    # Azure OpenAI.
+    # Deployment defaults match what's actually deployed on the POC resource
+    # (see docs/AZURE_SETUP_GUIDE.md §2): a reasoning-family chat model and the
+    # 1536-dim embedding model the Cosmos vector policy assumes (db.py
+    # EMBED_DIMENSIONS). .env overrides these per environment — the defaults
+    # exist so a missing var fails toward the correct model, not a 3072-dim one
+    # that would silently mismatch the index.
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = ""
-    azure_openai_chat_deployment: str = "gpt-4o"
-    azure_openai_embed_deployment: str = "text-embedding-3-large"
+    azure_openai_chat_deployment: str = "llm-wiki-chat"  # gpt-5-nano
+    azure_openai_embed_deployment: str = "llm-wiki-embed"  # text-embedding-3-small (1536-dim)
     azure_openai_api_version: str = "2024-10-21"
+    # gpt-5-nano is a reasoning-family model and rejects `temperature != 1`;
+    # the query path only forwards temperature when this is True. Flip it on
+    # when a non-reasoning chat model is deployed (see call_model). Until then
+    # fixed retrieval — not sampling — is the reproducibility lever.
+    chat_supports_temperature: bool = False
 
     # Cosmos DB (derived index — see docs/BUILD_SPEC.md storage model).
     # Entra ID auth (via the llm_wiki_poc app registration's own credentials

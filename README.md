@@ -39,7 +39,8 @@ docker build -t llmwiki .
 | `app/auth.py` | Entra OIDC flow, session cookie, team access checks |
 | `app/wiki.py` | Wikilinks, index regeneration, individual-editable vs team-append-only rules, and the multi-page `Changeset`/`build_changeset`/`apply_changeset` review machinery shared by ingest, push, and query-save; `export_wiki()` |
 | `app/ingest/` | Extractors (pdf/docx/pptx/xlsx/csv/text/url) + manual/automatic pipeline; raw sources written to blob for provenance |
-| `app/query.py` | Query operation: ask a question, get a cited synthesized answer, optionally save it to the wiki via the same multi-page changeset review flow as ingest |
+| `app/query.py` | Query operation: ask a question, get a cited synthesized answer (or an honest "the wiki doesn't cover this" when retrieval is empty, no fabrication), optionally save it to the wiki via the same multi-page changeset review flow as ingest |
+| `app/knowledge_map.py` | Whole-wiki structure from the explicit `[[link]]` graph (not embeddings): networkx Louvain community detection + one naming call per community, cached as a non-indexed `_map/map.json` blob; feeds both the radial Map view and the deterministic Contents page |
 | `app/push.py` | Individual→team push: placement, two-stage conflict check, changeset preview/confirm |
 | `app/derived_views.py` | Team-tier derived current-view pages: regenerated wholesale from a page's append log, machine-generated marker + link back to the log, non-indexed blob storage (disposable/regeneratable) |
 | `app/schema.py` | Per-scope `_schema.md` governance/personalization doc: blob-backed storage + versioning, shipped default, read into every ingest/query/lint system prompt, `automatic_lint_queue_threshold` operating parameter |
@@ -55,7 +56,6 @@ Nothing built:
 - Playwright rendering for JS-heavy pages (trafilatura path works today)
 - Agent-proposed `_schema.md` amendments ("you consistently asked me to keep summaries shorter — should I add that?") — schema doc is currently user-edited only, no amendment-proposal flow yet
 - Few-shot personalization (retrieving past discussion transcripts as few-shot context) — not wired up
-- Themes page and radial map view (clustering infra)
 - Email ingest (deferred until Graph `Mail.Read` is set up)
 - Multi-source manual-mode queue UI (sessions are created; only the first is auto-opened)
 
@@ -66,3 +66,5 @@ Built narrower than the spec technically calls for, flagged rather than silently
 - Contradiction/staleness lint findings are judgment-only flags with no auto-generated resolution diff — approving one acknowledges it; deciding *how* to fix it is manual, by design (build spec: getting this wrong writes a confident falsehood).
 - The unreviewed lint count is visible on the workspace page and the lint queue itself, not in the global nav on every route (e.g. not on page-view or push-preview screens) — a narrower reading of the build spec's "visible from anywhere," chosen to avoid an extra blob read on every page load for a count that's cheap to check from the workspace hub.
 - Push builds the same `Changeset`/review-component the other two callers use, but with `include_cross_page=False` — it does not run the model-driven cross-page-update detection ingest and query-save get (see `app/push.py` docstring), since push already ran its own placement step to choose one target page and the build spec states the "10-15 pages is normal" breadth requirement for ingest, not push.
+- Query-path `temperature=0` (build spec) is plumbed through `call_model` but only forwarded when `chat_supports_temperature` is set — the deployed reasoning-family model (`gpt-5-nano`) rejects `temperature != 1`, so it's inert until a non-reasoning model is deployed. Fixed retrieval, not sampling, is the reproducibility lever meanwhile, as the spec notes.
+- The Contents page groups by the cached knowledge-map communities; before the map has been built once (or right after new pages are added), unclustered pages appear under "Recently added"/"Unlinked" until the next map regeneration, rather than triggering an immediate (costly) recompute on every ingest.

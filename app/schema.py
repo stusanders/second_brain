@@ -93,6 +93,17 @@ def context_block(tier: str, owner: str) -> str:
     return f"<schema_doc>\n{read_schema(tier, owner)}\n</schema_doc>"
 
 
+def system_prefix(op_system: str, tier: str, owner: str) -> str:
+    """Assemble a system prompt with the owner-stable schema block FIRST and
+    the operation-specific instruction after it (build spec: prompt-cache
+    discipline). The schema doc is identical across ingest/query/lint for a
+    given owner, so leading with it lets those operations share one cacheable
+    prefix; the op-specific text — which differs per operation — comes last.
+    Any volatile per-call content (source text, the question) must be appended
+    by the caller AFTER this prefix, never spliced into it."""
+    return f"{context_block(tier, owner)}\n\n{op_system}"
+
+
 DEFAULT_AUTOMATIC_LINT_QUEUE_THRESHOLD = 20
 
 

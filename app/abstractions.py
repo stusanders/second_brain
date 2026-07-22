@@ -53,9 +53,27 @@ def _openai() -> AzureOpenAI:
 # ---------------------------------------------------------------- call_model
 
 
-def call_model(prompt: str, context: str = "", *, system: str = "", max_tokens: int = 2000) -> str:
+def _temperature_ok(temperature: float | None) -> bool:
+    """Only forward an explicit temperature to the SDK when the deployed chat
+    model actually accepts it (reasoning-family models reject non-default)."""
+    return temperature is not None and get_settings().chat_supports_temperature
+
+
+def call_model(
+    prompt: str,
+    context: str = "",
+    *,
+    system: str = "",
+    max_tokens: int = 2000,
+    temperature: float | None = None,
+) -> str:
     """Single chat completion. `context` is retrieved wiki/source content kept
-    separate from the instruction so callers keep scope narrow (cost discipline)."""
+    separate from the instruction so callers keep scope narrow (cost discipline).
+
+    `temperature` is forwarded only when set AND the deployed chat model
+    supports it (`chat_supports_temperature`) — reasoning-family models like
+    gpt-5-nano reject `temperature != 1`, so passing it there is a 400. It is
+    therefore plumbed but inert on the current model until a swap flips the flag."""
     s = get_settings()
     messages = []
     if system:
@@ -67,6 +85,7 @@ def call_model(prompt: str, context: str = "", *, system: str = "", max_tokens: 
         messages=messages,
         max_completion_tokens=max_tokens,
         reasoning_effort="low",
+        **({"temperature": temperature} if _temperature_ok(temperature) else {}),
     )
     content = resp.choices[0].message.content
     if not content:
@@ -76,14 +95,18 @@ def call_model(prompt: str, context: str = "", *, system: str = "", max_tokens: 
     return content
 
 
-def call_model_chat(messages: list[dict], *, max_tokens: int = 2000) -> str:
-    """Multi-turn variant for the manual-mode agent-led discussion."""
+def call_model_chat(
+    messages: list[dict], *, max_tokens: int = 2000, temperature: float | None = None
+) -> str:
+    """Multi-turn variant for the manual-mode agent-led discussion. Same
+    temperature caveat as call_model — forwarded only when the model supports it."""
     s = get_settings()
     resp = _openai().chat.completions.create(
         model=s.azure_openai_chat_deployment,
         messages=messages,
         max_completion_tokens=max_tokens,
         reasoning_effort="low",
+        **({"temperature": temperature} if _temperature_ok(temperature) else {}),
     )
     content = resp.choices[0].message.content
     if not content:

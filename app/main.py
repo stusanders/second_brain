@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app import abstractions as ab
-from app import auth, derived_views, lint, push, query, schema, wiki
+from app import auth, derived_views, knowledge_map, lint, push, query, schema, wiki
 from app.ingest import extractors, pipeline
 from app.models import User, make_partition_key
 
@@ -163,6 +163,39 @@ def derived_view_regenerate(
         raise HTTPException(404, "Page not found.")
     derived_views.regenerate_derived_view(page, schema.context_block("team", team_id))
     return RedirectResponse(f"/team/{team_id}/derived/{slug}", status_code=303)
+
+
+@app.get("/{tier}/{owner}/contents")
+def contents(tier: str, owner: str, user: User = Depends(auth.current_user)):
+    """Convenience entry to the generated contents/Index page (a real wiki
+    page); redirects to the workspace if the wiki has no pages yet."""
+    scope = _scope_or_403(tier, owner, user)
+    page = ab.find_page_by_title(wiki.INDEX_TITLE, scope)
+    if page:
+        return RedirectResponse(f"/{tier}/{owner}/page/{page.id}")
+    return RedirectResponse(f"/{tier}/{owner}/")
+
+
+@app.get("/{tier}/{owner}/map", response_class=HTMLResponse)
+def knowledge_map_view(
+    tier: str, owner: str, request: Request, user: User = Depends(auth.current_user)
+):
+    """Radial knowledge map: whole-wiki structure grouped by [[link]]-graph
+    communities (not embeddings). Builds and caches the map on first view."""
+    _scope_or_403(tier, owner, user)
+    wiki_map = knowledge_map.get_or_build_map(tier, owner)
+    return templates.TemplateResponse(
+        request,
+        "map.html",
+        {"user": user, "tier": tier, "owner": owner, "map": wiki_map},
+    )
+
+
+@app.post("/{tier}/{owner}/map/regenerate")
+def knowledge_map_regenerate(tier: str, owner: str, user: User = Depends(auth.current_user)):
+    _scope_or_403(tier, owner, user)
+    knowledge_map.build_map(tier, owner)
+    return RedirectResponse(f"/{tier}/{owner}/map", status_code=303)
 
 
 @app.get("/{tier}/{owner}/log", response_class=HTMLResponse)

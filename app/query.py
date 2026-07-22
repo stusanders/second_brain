@@ -28,6 +28,15 @@ SAVE_SYSTEM = (
     "'# Title'. Use [[wikilinks]] for related concepts. Output only the markdown."
 )
 
+# Build spec: if the wiki genuinely doesn't cover the question, say so plainly
+# rather than fabricating from model priors — this matters most on the team
+# tier, where answers get trusted by people who didn't write the sources.
+NO_COVERAGE_MESSAGE = (
+    "The wiki doesn't currently cover this — no relevant pages were found. "
+    "I won't answer from general knowledge; ingest a source on this topic first, "
+    "then ask again."
+)
+
 
 @dataclass
 class QueryAnswer:
@@ -41,8 +50,19 @@ class QueryAnswer:
 def ask(question: str, tier: str, owner: str) -> QueryAnswer:
     scope = make_partition_key(tier, owner)  # type: ignore[arg-type]
     context = ab.get_context(question, scope)
-    system = ANSWER_SYSTEM + "\n\n" + schema.context_block(tier, owner)
-    answer = ab.call_model(question, context=context, system=system, max_tokens=900)
+    # Hard no-coverage trigger: retrieval found nothing (get_context returns ""
+    # on zero hits). Short-circuit without a model call so the answer can't be
+    # fabricated. Partial-coverage cases still lean on ANSWER_SYSTEM's "say so
+    # plainly rather than guessing" instruction as the softer second line.
+    if not context.strip():
+        return QueryAnswer(
+            question=question, answer=NO_COVERAGE_MESSAGE, tier=tier, owner=owner, sources=[]
+        )
+    system = schema.system_prefix(ANSWER_SYSTEM, tier, owner)
+    # temperature=0 is plumbed but inert on the reasoning-family chat model
+    # (see abstractions.call_model); fixed retrieval is the real reproducibility
+    # lever, per build spec. Activates automatically on a non-reasoning swap.
+    answer = ab.call_model(question, context=context, system=system, max_tokens=900, temperature=0)
     sources = ab.search(question, scope, top_k=5)
     return QueryAnswer(question=question, answer=answer, tier=tier, owner=owner, sources=sources)
 
@@ -60,7 +80,7 @@ def prepare_save(qa: QueryAnswer, user: User) -> wiki.Changeset:
     schema_ctx = schema.context_block(qa.tier, qa.owner)
     draft = ab.call_model(
         f"Question: {qa.question}\n\nAnswer:\n{qa.answer}",
-        system=SAVE_SYSTEM + "\n\n" + schema_ctx,
+        system=f"{schema_ctx}\n\n{SAVE_SYSTEM}",
         max_tokens=1500,
     )
     title, body = wiki.split_title(draft)

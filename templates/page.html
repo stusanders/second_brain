@@ -25,7 +25,7 @@
     {% if links_out %}<ul>{% for p in links_out %}
       <li><a href="/{{ tier }}/{{ owner }}/page/{{ p.id }}">{{ p.title }}</a></li>
     {% endfor %}</ul>{% else %}<p class="muted">none</p>{% endif %}
-    <p class="muted">What links here:</p>
+    <p class="muted">Linked from:</p>
     {% if backlinks %}<ul>{% for p in backlinks %}
       <li><a href="/{{ tier }}/{{ owner }}/page/{{ p.id }}">{{ p.title }}</a></li>
     {% endfor %}</ul>{% else %}<p class="muted">none</p>{% endif %}

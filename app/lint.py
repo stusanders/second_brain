@@ -291,7 +291,7 @@ def _find_contradictions_and_staleness(scope: str, schema_ctx: str) -> list[Lint
             verdict = ab.call_model(
                 f"Page A ('{full.title}', updated {full.updated_at[:10]}):\n{full.body[:4000]}\n\n"
                 f"Page B ('{other.title}', updated {other.updated_at[:10]}):\n{other.body[:4000]}",
-                system=CONFLICT_STALE_SYSTEM + "\n\n" + schema_ctx,
+                system=(schema_ctx + "\n\n" if schema_ctx else "") + CONFLICT_STALE_SYSTEM,
                 max_tokens=100,
             ).strip()
             if verdict.upper().startswith("CONTRADICTION"):
@@ -325,7 +325,9 @@ def _find_data_gaps(scope: str, schema_ctx: str) -> list[LintFinding]:
         return []
     titles = "\n".join(f"- {p.title}" for p in pages)
     reply = ab.call_model(
-        titles, system=DATA_GAP_SYSTEM + "\n\n" + schema_ctx, max_tokens=400
+        titles,
+        system=(schema_ctx + "\n\n" if schema_ctx else "") + DATA_GAP_SYSTEM,
+        max_tokens=400,
     ).strip()
     findings = []
     for line in reply.splitlines():

@@ -20,8 +20,7 @@ This is a config object, not hosted infrastructure — no cost, no server. **No 
 2. Under **Authentication**, add a **Web** platform. This app runs entirely server-side, so it is a **confidential client** — not a public client.
 3. Under **Certificates & secrets**, create a **client secret**. Copy the value immediately; it's only shown once.
 4. **Redirect URI**: add `http://localhost:8000/auth/callback` now for local dev. Add the production `https://<your-container-app>.azurecontainerapps.io/auth/callback` after deployment (step 5).
-5. Under **Token configuration** → Add groups claim → select the group types to include. **As configured for this build: "All groups".** Under "Customize token properties by type", check **Group ID** for both **ID** and **Access** tokens; leave the on-premises AD identifier options and "emit as role claims" unchecked, and leave SAML alone entirely. This resolves team membership from the token with no admin consent needed.
-   - Note: **"Security groups"** would be the tighter choice — it still includes the Microsoft 365 Groups that back Teams (what team-scoping actually matches on) while excluding distribution lists and directory roles, which are noise here. "All groups" works fine because the app filters to specific group IDs regardless; the only cost is a slightly larger token. Switch to "Security groups" if you want to trim it, no code change needed either way.
+5. Under **Token configuration** → Add groups claim → select **Security groups** (this includes Microsoft 365 Groups, which is what backs Teams). Under "Customize token properties by type", check **Group ID** for both **ID** and **Access** tokens; leave the on-premises AD identifier options and "emit as role claims" unchecked, and leave SAML alone entirely. This resolves team membership from the token with no admin consent needed.
 6. Under **API permissions**, keep only the delegated default:
    - Microsoft Graph: `User.Read`
    - **Do not add `Sites.ReadWrite.All`** — SharePoint/OneDrive integration is explicitly out of scope, and wiki content lives in Blob Storage (which authenticates via account key or managed identity, not Graph).
@@ -101,13 +100,7 @@ This is the **derived index** over the blob-stored markdown — not the source o
 2. Create a Container Apps Environment in the same EU region as your other resources.
 3. **Configure scale-to-zero** (minimum replicas = 0) unless you have a reason not to. For an intermittently-used POC, leaving a minimum replica running 24/7 will likely cost more than all your storage combined.
 4. You'll deploy the actual app image here once built — this step is mainly about provisioning the environment and confirming region/networking now, so it's ready.
-5. Configure the app's environment variables/secrets via Container Apps' secrets management — don't hardcode any into the built image:
-   - Blob Storage account name + key
-   - **Cosmos DB endpoint only — no key** (key-based auth is disabled; the app authenticates via the Entra ID client credentials below using `ClientSecretCredential`, so those must be present for Cosmos access to work at all)
-   - Azure OpenAI endpoint + key + deployment names
-   - Entra ID client ID / tenant ID / client secret (these do double duty: OIDC sign-in *and* the Cosmos RBAC credential)
-   - session secret
-   - At deploy time, consider switching Blob and Azure OpenAI to the app's **managed identity** as well — Container Apps supports a system-assigned identity, which would remove the two remaining account keys from this list entirely and match the RBAC approach Cosmos already uses. Deferred, not required, but a natural cleanup once hosted.
+5. Configure the app's environment variables/secrets (Blob Storage account name+key, Cosmos DB endpoint+key, Azure OpenAI endpoint+key+deployment names, Entra ID client ID / tenant ID / client secret, session secret) via Container Apps' secrets management — don't hardcode any of these into the built image.
 6. After the app has a URL, go back to the app registration and add the production redirect URI.
 
 ## 6. Confirm team membership structure

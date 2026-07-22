@@ -129,26 +129,56 @@ def append_to_team_page(
     return ab.write_page(page, change_type="merge_append", author_id=user.id)
 
 
-def _index_body(scope: str, extra_titles: list[str] | None = None) -> str:
-    """`extra_titles` lets a changeset's index item reflect pages the
-    changeset itself is about to add/update but that aren't in Cosmos yet
-    (nothing is written until the changeset is approved) — otherwise the
-    index diff shown for review would omit the very page the user is
-    approving."""
-    titles_list = [p.title for p in ab.list_pages(scope) if p.title != INDEX_TITLE]
-    for t in extra_titles or []:
-        if t not in titles_list:
-            titles_list.append(t)
-    if not titles_list:
-        return "_No pages yet._"
-    titles = "\n".join(f"- {t}" for t in titles_list)
-    return ab.call_model(
-        "Organize these wiki page titles into a markdown contents page grouped "
-        "under a few sensible category headings. Link each title as [[Title]]. "
-        "Output only the markdown, no preamble.\n\n" + titles,
-        system="You maintain a personal knowledge wiki's index page.",
-        max_tokens=1200,
-    )
+def _index_body(scope: str, tier: str, owner: str, extra_titles: list[str] | None = None) -> str:
+    """Deterministic contents page — a plain catalogue of [[links]] grouped by
+    category, with NO LLM prose (build spec: "Just links, no LLM-generated
+    prose summary"). Categories come from the cached knowledge-map communities
+    (link-graph, not embeddings) so Contents and the Map tell the same story;
+    the only model calls involved are the community-naming ones already cached
+    in the map artifact, not one per index regeneration.
+
+    `extra_titles` lets a changeset's index item reflect pages the changeset is
+    about to add/update but that aren't in Cosmos yet (nothing is written until
+    approval) — otherwise the index diff shown for review would omit the very
+    page being approved. Such not-yet-clustered pages appear under "Recently
+    added" until the next map regeneration places them.
+
+    Before a map has ever been built, falls back to a flat alphabetical
+    catalogue — still deterministic, still no model call."""
+    from app import knowledge_map
+
+    pages = [p for p in ab.list_pages(scope) if p.title != INDEX_TITLE]
+    current_titles = {p.title for p in pages}
+    title_by_id = {p.id: p.title for p in pages}
+    extras = [t for t in (extra_titles or []) if t != INDEX_TITLE]
+
+    def _links(titles: list[str]) -> str:
+        return "\n".join(f"- [[{t}]]" for t in sorted(titles))
+
+    wiki_map = knowledge_map.load_map(tier, owner)
+    if not wiki_map:
+        all_titles = current_titles | set(extras)
+        return _links(list(all_titles)) if all_titles else "_No pages yet._"
+
+    sections: list[str] = []
+    placed: set[str] = set()
+    for community in wiki_map.get("communities", []):
+        members = [title_by_id[i] for i in community["page_ids"] if i in title_by_id]
+        if not members:
+            continue
+        placed.update(members)
+        sections.append(f"## {community['name']}\n{_links(members)}")
+
+    recently_added = [t for t in extras if t not in placed]
+    if recently_added:
+        placed.update(recently_added)
+        sections.append(f"## Recently added\n{_links(recently_added)}")
+
+    unlinked = [t for t in current_titles if t not in placed]
+    if unlinked:
+        sections.append(f"## Unlinked\n{_links(unlinked)}")
+
+    return "\n\n".join(sections) if sections else "_No pages yet._"
 
 
 def regenerate_index(scope: str, tier: str, owner: str, author_id: str) -> Page:
@@ -156,7 +186,7 @@ def regenerate_index(scope: str, tier: str, owner: str, author_id: str) -> Page:
     short structured model call. Standalone entry point used by lint (index
     regen after a mechanical fix); ingest/push/query route index regen
     through the changeset's own index item instead (see build_changeset)."""
-    body = _index_body(scope)
+    body = _index_body(scope, tier, owner)
     page = ab.find_page_by_title(INDEX_TITLE, scope)
     if page:
         page.body = body
@@ -311,7 +341,7 @@ def build_changeset(
             decision = ab.call_model(
                 f"New/updated page '{primary_title}':\n{primary_body[:3000]}\n\n"
                 f"Existing related page '{candidate.title}':\n{candidate.body[:3000]}",
-                system=CROSS_PAGE_DECIDE_SYSTEM + ("\n\n" + schema_ctx if schema_ctx else ""),
+                system=(schema_ctx + "\n\n" if schema_ctx else "") + CROSS_PAGE_DECIDE_SYSTEM,
                 max_tokens=10,
             ).strip()
             if not decision.upper().startswith("YES"):
@@ -320,7 +350,7 @@ def build_changeset(
                 note = ab.call_model(
                     f"New/updated page '{primary_title}':\n{primary_body[:3000]}\n\n"
                     f"Existing team page '{candidate.title}':\n{candidate.body[:3000]}",
-                    system=CROSS_PAGE_NOTE_SYSTEM + ("\n\n" + schema_ctx if schema_ctx else ""),
+                    system=(schema_ctx + "\n\n" if schema_ctx else "") + CROSS_PAGE_NOTE_SYSTEM,
                     max_tokens=250,
                 )
                 cand_new_body = _team_append_body(candidate.body, note, user.name)
@@ -328,7 +358,7 @@ def build_changeset(
                 cand_new_body = ab.call_model(
                     f"New/updated page '{primary_title}':\n{primary_body[:3000]}\n\n"
                     f"Existing page to update, '{candidate.title}':\n{candidate.body}",
-                    system=CROSS_PAGE_DRAFT_SYSTEM + ("\n\n" + schema_ctx if schema_ctx else ""),
+                    system=(schema_ctx + "\n\n" if schema_ctx else "") + CROSS_PAGE_DRAFT_SYSTEM,
                     max_tokens=2000,
                 )
             items.append(_mk_item(candidate.title, candidate.body, cand_new_body, is_new=False))
@@ -338,7 +368,9 @@ def build_changeset(
         # Include this changeset's own item titles — nothing is written yet,
         # so without this the index diff shown for review would omit the
         # very pages the user is about to approve.
-        new_index_body = _index_body(scope, extra_titles=[item.title for item in items])
+        new_index_body = _index_body(
+            scope, tier, owner, extra_titles=[item.title for item in items]
+        )
         items.append(
             _mk_item(
                 INDEX_TITLE, index_page.body if index_page else "", new_index_body, not index_page

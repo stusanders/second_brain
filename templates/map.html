@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Knowledge map{% endblock %}
+{% block content %}
+<h1>Knowledge map</h1>
+<p class="muted">
+  Grouped by how pages actually link to each other ([[wikilinks]]), not by topic similarity.
+  Tap a group to see its pages; tap a page to open it.
+  {% if map.generated_at %}Built {{ map.generated_at[:16].replace("T", " ") }}.{% endif %}
+</p>
+
+<div class="card">
+  <div id="map-controls" style="display:flex; gap:.8rem; align-items:center; margin-bottom:.6rem;">
+    <button type="button" id="back-btn" class="secondary" style="display:none;">← All groups</button>
+    <span id="focus-label" class="muted"></span>
+    <span style="flex:1;"></span>
+    <form method="post" action="/{{ tier }}/{{ owner }}/map/regenerate" style="margin:0;">
+      <button type="submit" class="secondary">Regenerate map</button>
+    </form>
+  </div>
+  <svg id="map-svg" viewBox="0 0 760 560" style="width:100%; height:auto;"
+       font-family="system-ui,sans-serif" role="img" aria-label="Radial knowledge map"></svg>
+</div>
+
+{% if map.unplaced %}
+<div class="card">
+  <h3>Unplaced pages <span class="muted">(nothing links to them yet)</span></h3>
+  <ul>
+    {% for id in map.unplaced %}
+      <li><a href="/{{ tier }}/{{ owner }}/page/{{ id }}">{{ map.nodes[id].title }}</a></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<script>
+  const MAP = {{ map | tojson }};
+  const TIER = {{ tier | tojson }};
+  const OWNER = {{ owner | tojson }};
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const svg = document.getElementById("map-svg");
+  const backBtn = document.getElementById("back-btn");
+  const focusLabel = document.getElementById("focus-label");
+  const CX = 380, CY = 280;
+  const communities = MAP.communities || [];
+  let focused = null; // community index, or null for overview
+
+  const stroke = getComputedStyle(document.body).getPropertyValue("--border") || "#ccc";
+  const accent = getComputedStyle(document.body).getPropertyValue("--accent") || "#0b5cad";
+  const fg = getComputedStyle(document.body).getPropertyValue("--fg") || "#222";
+  const muted = getComputedStyle(document.body).getPropertyValue("--muted") || "#778";
+
+  function el(name, attrs, text) {
+    const n = document.createElementNS(SVGNS, name);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function clear() { while (svg.firstChild) svg.removeChild(svg.firstChild); }
+  function line(x1, y1, x2, y2, color) {
+    return el("line", { x1, y1, x2, y2, stroke: color, "stroke-width": 1, opacity: .5 });
+  }
+  function label(x, y, t, color, size) {
+    const s = t.length > 22 ? t.slice(0, 21) + "…" : t;
+    return el("text", { x, y, "text-anchor": "middle", fill: color,
+      "font-size": size || 12 }, s);
+  }
+  function hub() {
+    const g = el("g", {});
+    g.appendChild(el("circle", { cx: CX, cy: CY, r: 26, fill: accent, opacity: .9 }));
+    g.appendChild(label(CX, CY + 4, "Wiki", "#fff", 12));
+    return g;
+  }
+
+  function renderOverview() {
+    clear();
+    focused = null;
+    backBtn.style.display = "none";
+    focusLabel.textContent = communities.length
+      ? communities.length + " group" + (communities.length === 1 ? "" : "s")
+      : "";
+    if (!communities.length) {
+      svg.appendChild(label(CX, CY, "No links yet — the map fills in as pages cross-reference.", muted, 13));
+      return;
+    }
+    const R = 200;
+    const n = communities.length;
+    const maxSize = Math.max(...communities.map(c => c.page_ids.length));
+    communities.forEach((c, i) => {
+      const a = (i / n) * 2 * Math.PI - Math.PI / 2;
+      const x = CX + R * Math.cos(a), y = CY + R * Math.sin(a);
+      svg.appendChild(line(CX, CY, x, y, stroke));
+      const r = 14 + 26 * (c.page_ids.length / maxSize);
+      const node = el("g", { style: "cursor:pointer;" });
+      node.appendChild(el("circle", { cx: x, cy: y, r, fill: "transparent",
+        stroke: accent, "stroke-width": 2 }));
+      node.appendChild(label(x, y + 4, String(c.page_ids.length), fg, 13));
+      node.appendChild(label(x, y + r + 15, c.name, fg, 12));
+      node.addEventListener("click", () => renderFocus(i));
+      svg.appendChild(node);
+    });
+    svg.appendChild(hub());
+  }
+
+  function renderFocus(idx) {
+    clear();
+    focused = idx;
+    const c = communities[idx];
+    backBtn.style.display = "";
+    focusLabel.textContent = c.name + " · " + c.page_ids.length + " pages";
+    const ids = c.page_ids;
+    const R = 210;
+    const n = ids.length;
+    const pos = {};
+    ids.forEach((id, i) => {
+      const a = (i / n) * 2 * Math.PI - Math.PI / 2;
+      pos[id] = { x: CX + R * Math.cos(a), y: CY + R * Math.sin(a) };
+    });
+    // Intra-group links (the actual [[wikilink]] edges among these pages).
+    const inGroup = new Set(ids);
+    (MAP.edges || []).forEach(([u, v]) => {
+      if (inGroup.has(u) && inGroup.has(v)) {
+        svg.appendChild(line(pos[u].x, pos[u].y, pos[v].x, pos[v].y, accent));
+      }
+    });
+    ids.forEach(id => {
+      const p = pos[id];
+      svg.appendChild(line(CX, CY, p.x, p.y, stroke));
+      const node = el("a", { href: "/" + TIER + "/" + OWNER + "/page/" + id,
+        style: "cursor:pointer;" });
+      node.appendChild(el("circle", { cx: p.x, cy: p.y, r: 8, fill: accent }));
+      node.appendChild(label(p.x, p.y - 14, MAP.nodes[id] ? MAP.nodes[id].title : id, fg, 11));
+      svg.appendChild(node);
+    });
+    const g = el("g", {});
+    g.appendChild(el("circle", { cx: CX, cy: CY, r: 30, fill: accent, opacity: .9 }));
+    g.appendChild(label(CX, CY + 4, c.name, "#fff", 11));
+    svg.appendChild(g);
+  }
+
+  backBtn.addEventListener("click", renderOverview);
+  renderOverview();
+</script>
+{% endblock %}

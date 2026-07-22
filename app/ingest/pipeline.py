@@ -55,7 +55,7 @@ def ingest_automatic(source: ExtractedSource, user: User) -> list[str]:
     draft = ab.call_model(
         "Summarize this source into a wiki page.",
         context=source.text,
-        system=SUMMARY_SYSTEM + "\n\n" + schema_ctx,
+        system=f"{schema_ctx}\n\n{SUMMARY_SYSTEM}",
     )
     title, body = wiki.split_title(draft)
     source_ref_id = _store_raw_source(source, user)
@@ -108,9 +108,11 @@ def start_manual_session(source: ExtractedSource, user: User) -> ManualSession:
     session.messages = [
         {
             "role": "system",
-            "content": DISCUSSION_SYSTEM
+            # Schema block first (stable, cacheable), then the operation
+            # instruction, then the volatile source text last.
+            "content": schema.context_block("individual", user.id)
             + "\n\n"
-            + schema.context_block("individual", user.id)
+            + DISCUSSION_SYSTEM
             + "\n\n<source>\n"
             + source.text
             + "\n</source>",
