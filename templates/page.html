@@ -47,6 +47,20 @@
   </div>
   {% endif %}
 
+  {% if page.source_refs %}
+  <div class="card">
+    <h3>Sources</h3>
+    <p class="muted">The documents this page was synthesized from — the originals, verbatim.</p>
+    <ul>
+    {% for ref in page.source_refs %}
+      {% set name = ref.split("/")[-1] %}
+      <li><a href="/{{ tier }}/{{ owner }}/source?path={{ ref | urlencode }}">
+        {{ name[33:] if name|length > 33 else name }}</a></li>
+    {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
   <div class="card">
     <h3>History</h3>
     <ul>

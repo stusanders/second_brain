@@ -34,6 +34,7 @@
 
 <script>
   const MAP = {{ map | tojson }};
+  const FRONTIER = {{ frontier | default([]) | tojson }};
   const TIER = {{ tier | tojson }};
   const OWNER = {{ owner | tojson }};
   const SVGNS = "http://www.w3.org/2000/svg";
@@ -98,6 +99,25 @@
       node.addEventListener("click", () => renderFocus(i));
       svg.appendChild(node);
     });
+    // Predicted frontier: greyed, dashed, non-clickable nodes on an outer
+    // ring — map layer only, never part of the wiki itself (MVP spec).
+    if (FRONTIER.length) {
+      const FR = 262;
+      FRONTIER.forEach((f, i) => {
+        // Offset half a slot so frontier nodes sit between community spokes.
+        const a = ((i + 0.5) / FRONTIER.length) * 2 * Math.PI - Math.PI / 2;
+        const x = CX + FR * Math.cos(a), y = CY + FR * Math.sin(a);
+        const g = el("g", { opacity: .55 });
+        const c = el("circle", { cx: x, cy: y, r: 9, fill: "transparent",
+          stroke: muted, "stroke-width": 1.5, "stroke-dasharray": "3 3" });
+        const t = el("title", {}, (f.note || "Predicted — not in the wiki"));
+        c.appendChild(t);
+        g.appendChild(c);
+        g.appendChild(label(x, y + 20, f.title, muted, 10));
+        svg.appendChild(g);
+      });
+      svg.appendChild(label(CX, 548, "Dashed grey = predicted frontier — territory the corpus implies but does not cover.", muted, 11));
+    }
     svg.appendChild(hub());
   }
 

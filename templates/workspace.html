@@ -29,9 +29,11 @@
       {% endfor %}
       </ul>
     {% else %}
-      <p class="muted">No pages yet{% if tier == "individual" %} — drop a source to get started{% endif %}.</p>
+      <p class="muted">No pages yet.
+        <a href="/{{ tier }}/{{ owner }}/corpus"><strong>Build a wiki from your documents →</strong></a></p>
     {% endif %}
-    <p><a href="/{{ tier }}/{{ owner }}/contents">Contents</a> ·
+    <p><a href="/{{ tier }}/{{ owner }}/corpus">Build from documents</a> ·
+       <a href="/{{ tier }}/{{ owner }}/contents">Contents</a> ·
        <a href="/{{ tier }}/{{ owner }}/map">Map</a> ·
        <a href="/{{ tier }}/{{ owner }}/query">Ask a question</a> ·
        <a href="/{{ tier }}/{{ owner }}/log">Ingest log</a> ·

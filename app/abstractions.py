@@ -455,3 +455,16 @@ def list_ingest_log(scope: str, limit: int = 200) -> list[IngestLogEntry]:
 
 def scope_for(tier: str, owner: str) -> str:
     return make_partition_key(tier, owner)  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------- raw sources
+
+
+def read_raw_source(path: str) -> bytes | None:
+    """Passthrough so routes can serve stored source documents (provenance
+    check on synthesized pages) without importing blob_store directly."""
+    return blob_store.read_raw_source(path)
+
+
+def count_raw_sources(tier: str, owner_id: str) -> int:
+    return len(blob_store.list_raw_source_paths(tier, owner_id))

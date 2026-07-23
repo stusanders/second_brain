@@ -1,3 +1,4 @@
+import mimetypes
 import re
 import uuid
 
@@ -8,6 +9,8 @@ from fastapi.templating import Jinja2Templates
 
 from app import abstractions as ab
 from app import auth, derived_views, knowledge_map, lint, push, query, schema, wiki
+from app.corpus import frontier as corpus_frontier
+from app.corpus import pipeline as corpus_pipeline
 from app.ingest import extractors, pipeline
 from app.models import User, make_partition_key
 
@@ -184,10 +187,19 @@ def knowledge_map_view(
     communities (not embeddings). Builds and caches the map on first view."""
     _scope_or_403(tier, owner, user)
     wiki_map = knowledge_map.get_or_build_map(tier, owner)
+    # Frontier is a map-layer artifact only (MVP spec): greyed predicted
+    # territory, never entering the wiki, index, search, or export.
+    frontier_data = corpus_frontier.load_frontier(tier, owner) or {}
     return templates.TemplateResponse(
         request,
         "map.html",
-        {"user": user, "tier": tier, "owner": owner, "map": wiki_map},
+        {
+            "user": user,
+            "tier": tier,
+            "owner": owner,
+            "map": wiki_map,
+            "frontier": frontier_data.get("items", []),
+        },
     )
 
 
@@ -206,6 +218,102 @@ def ingest_log(tier: str, owner: str, request: Request, user: User = Depends(aut
         "log.html",
         {"user": user, "tier": tier, "owner": owner, "entries": ab.list_ingest_log(scope)},
     )
+
+
+# ------------------------------------------------------------------ corpus
+
+
+@app.get("/{tier}/{owner}/source")
+def download_source(tier: str, owner: str, path: str, user: User = Depends(auth.current_user)):
+    """Serve a stored raw source verbatim — the provenance check on
+    synthesized pages. Path must belong to the requested (authorized) scope."""
+    _scope_or_403(tier, owner, user)
+    if not path.startswith(f"{tier}/{owner}/") or ".." in path:
+        raise HTTPException(404)
+    data = ab.read_raw_source(path)
+    if data is None:
+        raise HTTPException(404, "Source not found.")
+    blob_name = path.rsplit("/", 1)[-1]
+    filename = blob_name[33:] if len(blob_name) > 33 and blob_name[32] == "-" else blob_name
+    media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@app.get("/{tier}/{owner}/corpus", response_class=HTMLResponse)
+def corpus_form(
+    tier: str,
+    owner: str,
+    request: Request,
+    error: str = "",
+    user: User = Depends(auth.current_user),
+):
+    scope = _scope_or_403(tier, owner, user)
+    return templates.TemplateResponse(
+        request,
+        "corpus.html",
+        {
+            "user": user,
+            "tier": tier,
+            "owner": owner,
+            "error": error,
+            "stored_sources": ab.count_raw_sources(tier, owner),
+            "has_pages": bool(ab.list_pages(scope)),
+            "running": corpus_pipeline.is_running(tier, owner),
+        },
+    )
+
+
+@app.post("/{tier}/{owner}/corpus/build")
+async def corpus_build(
+    tier: str,
+    owner: str,
+    request: Request,
+    files: list[UploadFile] | None = None,
+    rebuild: str = Form(""),
+    reuse: str = Form(""),
+    user: User = Depends(auth.current_user),
+):
+    _scope_or_403(tier, owner, user)
+    uploads: list[tuple[str, bytes]] = []
+    if not reuse:
+        for f in files or []:
+            if f.filename:
+                # Folder drops send relative paths — keep the basename only.
+                uploads.append((f.filename.rsplit("/", 1)[-1], await f.read()))
+        if not uploads:
+            return RedirectResponse(
+                f"/{tier}/{owner}/corpus?error=No+files+selected.", status_code=303
+            )
+    error = corpus_pipeline.start_run(
+        uploads, tier, owner, user, rebuild=bool(rebuild), reuse_sources=bool(reuse)
+    )
+    if error:
+        from urllib.parse import quote
+
+        return RedirectResponse(f"/{tier}/{owner}/corpus?error={quote(error)}", status_code=303)
+    return RedirectResponse(f"/{tier}/{owner}/corpus/progress", status_code=303)
+
+
+@app.get("/{tier}/{owner}/corpus/progress", response_class=HTMLResponse)
+def corpus_progress(
+    tier: str, owner: str, request: Request, user: User = Depends(auth.current_user)
+):
+    _scope_or_403(tier, owner, user)
+    return templates.TemplateResponse(
+        request,
+        "corpus_progress.html",
+        {"user": user, "tier": tier, "owner": owner},
+    )
+
+
+@app.get("/{tier}/{owner}/corpus/status")
+def corpus_status(tier: str, owner: str, user: User = Depends(auth.current_user)):
+    _scope_or_403(tier, owner, user)
+    return corpus_pipeline.get_status(tier, owner)
 
 
 # ------------------------------------------------------------------ ingest

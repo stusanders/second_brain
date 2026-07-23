@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Building wiki…{% endblock %}
+{% block content %}
+<p class="muted"><a href="/{{ tier }}/{{ owner }}/">&larr; back to wiki</a></p>
+<h1>Building your wiki</h1>
+
+<div class="card">
+  <p id="stage" style="font-size:1.1rem;"><strong>Starting…</strong></p>
+  <div style="background:var(--border); border-radius:6px; height:10px; overflow:hidden;">
+    <div id="bar" style="background:var(--accent); height:100%; width:0%; transition:width .4s;"></div>
+  </div>
+  <p class="muted" id="detail"></p>
+</div>
+
+<div class="card" id="done-card" style="display:none;">
+  <h3>Done</h3>
+  <ul id="counts"></ul>
+  <p>
+    <a href="/{{ tier }}/{{ owner }}/map"><strong>Open the map →</strong></a> ·
+    <a href="/{{ tier }}/{{ owner }}/contents">Contents</a> ·
+    <a href="/{{ tier }}/{{ owner }}/lint">Lint findings</a> ·
+    <a href="/{{ tier }}/{{ owner }}/">All pages</a>
+  </p>
+</div>
+
+<div class="card" id="error-card" style="display:none; border-color:#c0392b;">
+  <h3>Build failed</h3>
+  <p id="error-msg"></p>
+  <p><a href="/{{ tier }}/{{ owner }}/corpus">Back to build page</a></p>
+</div>
+
+<div class="card" id="warn-card" style="display:none;">
+  <h3>Skipped items</h3>
+  <ul id="warn-list" class="muted"></ul>
+</div>
+
+<script>
+  const STATUS_URL = "/{{ tier }}/{{ owner }}/corpus/status";
+  const LABELS = {
+    sources: "Source documents", concepts: "Concepts extracted",
+    concepts_cached: "Concept extractions reused from cache",
+    concepts_fresh: "Concept extractions computed",
+    pages_planned: "Pages planned", pages: "Pages written",
+    communities: "Communities", frontier: "Frontier predictions", lint: "Lint findings"
+  };
+  async function poll() {
+    let s;
+    try { s = await (await fetch(STATUS_URL)).json(); }
+    catch { setTimeout(poll, 5000); return; }
+    const stage = document.getElementById("stage");
+    const detail = document.getElementById("detail");
+    const bar = document.getElementById("bar");
+    if (s.state === "running" || s.state === "none") {
+      stage.innerHTML = "<strong>" + (s.stage || "Starting…") + "</strong>";
+      if (s.total > 1) {
+        detail.textContent = s.done + " of " + s.total;
+        bar.style.width = Math.round(100 * s.done / s.total) + "%";
+      } else { detail.textContent = ""; bar.style.width = ""; }
+      setTimeout(poll, 2500);
+      return;
+    }
+    if (s.state === "done") {
+      stage.innerHTML = "<strong>Complete</strong>";
+      bar.style.width = "100%";
+      const ul = document.getElementById("counts");
+      ul.innerHTML = "";
+      for (const k in LABELS) {
+        if (s.counts && s.counts[k] != null) {
+          const li = document.createElement("li");
+          li.textContent = LABELS[k] + ": " + s.counts[k];
+          ul.appendChild(li);
+        }
+      }
+      document.getElementById("done-card").style.display = "";
+    } else {
+      stage.innerHTML = "<strong>Failed</strong>";
+      document.getElementById("error-msg").textContent = s.error || "Unknown error.";
+      document.getElementById("error-card").style.display = "";
+    }
+    if (s.errors && s.errors.length) {
+      const ul = document.getElementById("warn-list");
+      ul.innerHTML = "";
+      s.errors.forEach(e => {
+        const li = document.createElement("li");
+        li.textContent = e.file + " — " + e.error;
+        ul.appendChild(li);
+      });
+      document.getElementById("warn-card").style.display = "";
+    }
+  }
+  poll();
+</script>
+{% endblock %}

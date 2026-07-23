@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Build from documents{% endblock %}
+{% block content %}
+<p class="muted"><a href="/{{ tier }}/{{ owner }}/">&larr; back to wiki</a></p>
+<h1>Build a wiki from your documents</h1>
+<p class="muted">
+  Drop a folder (or select files) and the pipeline reads every document, works out the
+  concepts they cover, consolidates them into one page set, writes each page from all its
+  sources, and maps the result. PDF, Word, PowerPoint, Excel/CSV, text and markdown.
+</p>
+
+{% if error %}<div class="card" style="border-color:#c0392b;"><p>{{ error }}</p></div>{% endif %}
+
+{% if running %}
+<div class="card">
+  <p>A build is currently running. <a href="/{{ tier }}/{{ owner }}/corpus/progress">View progress →</a></p>
+</div>
+{% else %}
+<div class="card">
+  <form method="post" action="/{{ tier }}/{{ owner }}/corpus/build" enctype="multipart/form-data">
+    <div id="drop-zone" style="border:2px dashed var(--border); border-radius:8px; padding:2rem;
+         text-align:center; cursor:pointer;">
+      <p><strong>Drop a folder here</strong> — or click to choose files</p>
+      <p class="muted" id="file-count">No files selected.</p>
+      <input type="file" name="files" id="file-input" webkitdirectory multiple style="display:none;">
+    </div>
+    <p style="margin-top:1rem;">
+      <label><input type="checkbox" name="rebuild" value="1" {% if not has_pages %}disabled{% endif %}>
+        Rebuild — wipe the generated wiki first
+        {% if has_pages %}<span class="muted">(required: this wiki already has pages)</span>
+        {% else %}<span class="muted">(nothing to wipe yet)</span>{% endif %}
+      </label>
+    </p>
+    <button type="submit">Build wiki</button>
+  </form>
+  <p class="muted">Original documents are stored verbatim and are never modified or deleted —
+     every generated page links back to the sources that fed it.</p>
+</div>
+
+{% if stored_sources %}
+<div class="card">
+  <h3>Re-run from stored sources</h3>
+  <p class="muted">{{ stored_sources }} document{{ "s" if stored_sources != 1 }} already stored.
+     Re-run the pipeline over them without re-uploading — unchanged documents skip
+     re-extraction (cached).</p>
+  <form method="post" action="/{{ tier }}/{{ owner }}/corpus/build">
+    <input type="hidden" name="reuse" value="1">
+    <input type="hidden" name="rebuild" value="1">
+    <button type="submit" class="secondary">Re-run pipeline (wipes generated wiki)</button>
+  </form>
+</div>
+{% endif %}
+{% endif %}
+
+<script>
+  const zone = document.getElementById("drop-zone");
+  const input = document.getElementById("file-input");
+  const count = document.getElementById("file-count");
+  if (zone) {
+    zone.addEventListener("click", () => input.click());
+    input.addEventListener("change", () => {
+      count.textContent = input.files.length
+        ? input.files.length + " file" + (input.files.length === 1 ? "" : "s") + " selected."
+        : "No files selected.";
+    });
+    ["dragover", "dragenter"].forEach(ev => zone.addEventListener(ev, e => {
+      e.preventDefault(); zone.style.borderColor = "var(--accent)";
+    }));
+    ["dragleave", "drop"].forEach(ev => zone.addEventListener(ev, e => {
+      e.preventDefault(); zone.style.borderColor = "var(--border)";
+    }));
+    zone.addEventListener("drop", e => {
+      // DataTransfer file lists include files from dropped folders in
+      // browsers that support webkitGetAsEntry; assigning to the input keeps
+      // the plain-form submission path.
+      if (e.dataTransfer.files.length) {
+        input.files = e.dataTransfer.files;
+        input.dispatchEvent(new Event("change"));
+      }
+    });
+  }
+</script>
+{% endblock %}
