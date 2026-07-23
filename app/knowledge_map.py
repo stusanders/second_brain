@@ -29,6 +29,7 @@ import networkx as nx
 
 from app import abstractions as ab
 from app import blob_store
+from app.config import get_settings
 from app.models import make_partition_key, now_iso
 from app.wiki import INDEX_TITLE
 
@@ -97,6 +98,9 @@ def _name_community(titles: list[str]) -> str:
                 "Titles:\n" + "\n".join(f"- {t}" for t in titles[:NAME_SAMPLE]),
                 system=NAME_SYSTEM,
                 max_tokens=30,
+                # Same deployment override the corpus pipeline uses — naming
+                # quality rides on the same model as the synthesis stages.
+                deployment=get_settings().corpus_chat_deployment,
             )
             .strip()
             .strip("\"'")
