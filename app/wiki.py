@@ -72,6 +72,31 @@ def resolve_links(body: str, scope: str) -> list[str]:
     return ids
 
 
+def parse_wikilink_titles(body: str) -> list[str]:
+    """The distinct [[Title]] strings in a body, in order of first appearance."""
+    seen: list[str] = []
+    for title in WIKILINK_RE.findall(body):
+        t = title.strip()
+        if t and t not in seen:
+            seen.append(t)
+    return seen
+
+
+def resolve_links_local(body: str, title_to_id: dict[str, str]) -> list[str]:
+    """Map [[Title]] links to page ids against an in-memory page set instead
+    of the Cosmos index — the corpus pipeline fixes its whole page set before
+    any page is written (MVP spec Stage 3/4 ordering), so links must resolve
+    against pages that don't exist in the index yet. Case-insensitive, like
+    find_page_by_title."""
+    lookup = {t.lower(): pid for t, pid in title_to_id.items()}
+    ids: list[str] = []
+    for title in parse_wikilink_titles(body):
+        pid = lookup.get(title.lower())
+        if pid and pid not in ids:
+            ids.append(pid)
+    return ids
+
+
 def upsert_individual_page(
     *, title: str, body: str, user: User, change_type: str, source_ref_id: str | None = None
 ) -> Page:

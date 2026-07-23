@@ -1,9 +1,10 @@
 """Blob Storage client — the canonical content store (build spec: "Storage
 model: markdown canonical, index rebuildable").
 
-Only `app.abstractions`, `scripts/provision_cosmos.py`'s reindex path, and
-`app.ingest.pipeline` (for raw source writes) may import this module —
-business logic goes through the abstraction layer.
+Only `app.abstractions`, `scripts/provision_cosmos.py`'s reindex path,
+`app.ingest.pipeline` (for raw source writes), and `app.corpus` (raw source
+writes + `_corpus/` pipeline artifacts) may import this module — business
+logic goes through the abstraction layer.
 
 Two containers:
     wiki    — page markdown + version snapshots (canonical wiki content)
@@ -93,6 +94,21 @@ def list_paths(prefix: str) -> list[str]:
     return [b.name for b in _wiki_container().list_blobs(name_starts_with=prefix)]
 
 
+def delete_prefix(prefix: str, *, keep_prefix: str = "") -> int:
+    """Delete every wiki-container blob under a prefix, optionally sparing one
+    sub-prefix (the corpus rebuild path keeps the Stage 2 concept cache while
+    wiping generated output). Never touches the sources container — raw
+    sources are immutable by rule. Returns the number of blobs deleted."""
+    container = _wiki_container()
+    count = 0
+    for name in list_paths(prefix):
+        if keep_prefix and name.startswith(keep_prefix):
+            continue
+        container.delete_blob(name)
+        count += 1
+    return count
+
+
 # ------------------------------------------------------------ concurrency
 
 
@@ -134,3 +150,10 @@ def read_raw_source(path: str) -> bytes | None:
         return _sources_container().download_blob(path).readall()
     except ResourceNotFoundError:
         return None
+
+
+def list_raw_source_paths(tier: str, owner_id: str) -> list[str]:
+    """All stored raw-source blob paths for a scope — lets the corpus
+    pipeline re-run over previously ingested documents without re-upload."""
+    prefix = f"{tier}/{owner_id}/"
+    return [b.name for b in _sources_container().list_blobs(name_starts_with=prefix)]

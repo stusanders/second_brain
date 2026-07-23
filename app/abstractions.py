@@ -66,6 +66,8 @@ def call_model(
     system: str = "",
     max_tokens: int = 2000,
     temperature: float | None = None,
+    json_mode: bool = False,
+    deployment: str = "",
 ) -> str:
     """Single chat completion. `context` is retrieved wiki/source content kept
     separate from the instruction so callers keep scope narrow (cost discipline).
@@ -73,7 +75,12 @@ def call_model(
     `temperature` is forwarded only when set AND the deployed chat model
     supports it (`chat_supports_temperature`) — reasoning-family models like
     gpt-5-nano reject `temperature != 1`, so passing it there is a 400. It is
-    therefore plumbed but inert on the current model until a swap flips the flag."""
+    therefore plumbed but inert on the current model until a swap flips the flag.
+
+    `json_mode` requests a JSON-object response (structured pipeline outputs);
+    `deployment` overrides the chat deployment for this call (empty = default)
+    — the corpus pipeline passes `corpus_chat_deployment` through here so the
+    synthesis stages can run on a stronger model via config alone."""
     s = get_settings()
     messages = []
     if system:
@@ -81,10 +88,11 @@ def call_model(
     user_content = f"<context>\n{context}\n</context>\n\n{prompt}" if context else prompt
     messages.append({"role": "user", "content": user_content})
     resp = _openai().chat.completions.create(
-        model=s.azure_openai_chat_deployment,
+        model=deployment or s.azure_openai_chat_deployment,
         messages=messages,
         max_completion_tokens=max_tokens,
         reasoning_effort="low",
+        **({"response_format": {"type": "json_object"}} if json_mode else {}),
         **({"temperature": temperature} if _temperature_ok(temperature) else {}),
     )
     content = resp.choices[0].message.content
@@ -307,6 +315,39 @@ def reindex(tier: str, owner_id: str) -> int:
         write_page(page, change_type="derived_view_regen", author_id="system:reindex")
         count += 1
     return count
+
+
+# ------------------------------------------------------------- reset_scope
+
+
+def reset_scope(tier: str, owner_id: str) -> dict:
+    """Wipe a scope's generated output for a corpus rebuild: wiki blobs
+    (pages, version snapshots, _map/_lint/_schema artifacts, _corpus outputs)
+    and the scope's Cosmos rows across all containers.
+
+    Two things deliberately survive: raw `sources/` blobs (immutable by rule —
+    delete_prefix only ever touches the wiki container) and the Stage 2
+    concept cache (`_corpus/concepts/`), so an eval re-run skips re-paying
+    one model call per unchanged document. Returns deletion counts."""
+    scope = make_partition_key(tier, owner_id)  # type: ignore[arg-type]
+    prefix = f"{tier}/{owner_id}/"
+    blobs_deleted = blob_store.delete_prefix(prefix, keep_prefix=f"{prefix}_corpus/concepts/")
+
+    rows_deleted = 0
+    for name in db.CONTAINERS:
+        container = db.get_container(name)
+        ids = [
+            r["id"]
+            for r in container.query_items(
+                query="SELECT c.id FROM c WHERE c.partition_key = @pk",
+                parameters=[{"name": "@pk", "value": scope}],
+                partition_key=scope,
+            )
+        ]
+        for item_id in ids:
+            container.delete_item(item_id, partition_key=scope)
+            rows_deleted += 1
+    return {"blobs_deleted": blobs_deleted, "rows_deleted": rows_deleted}
 
 
 # ------------------------------------------------------- plain reads / log

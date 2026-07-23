@@ -43,6 +43,18 @@ class Settings(BaseSettings):
     blob_wiki_container: str = "wiki"
     blob_sources_container: str = "sources"
 
+    # Corpus pipeline (docs/MVP_SPEC.md — one-shot document corpus → wiki).
+    # corpus_chat_deployment lets the synthesis stages run on a stronger model
+    # than the default chat deployment without a code change: the MVP tests
+    # whether synthesis is *good*, and a weak eval on the cheapest model must
+    # be distinguishable from "the premise fails". Empty = fall back to
+    # azure_openai_chat_deployment.
+    corpus_chat_deployment: str = ""
+    corpus_concurrency: int = 4  # Stage 2 parallel extraction cap
+    corpus_dedup_threshold: float = 0.82  # cosine cutoff for near-duplicate concept clustering
+    corpus_consolidate_batch: int = 8  # docs per group in hierarchical consolidation
+    corpus_max_page_chars: int = 24000  # passage budget per page before per-source summarization
+
     # App
     session_secret: str = "change-me"
     team_groups: str = "{}"  # JSON: group id -> team display name
