@@ -55,6 +55,14 @@ This also explains why the current carve is bad, and it is not a tuning problem.
 the same source document; so the groups track provenance. Filing by which document
 something came from is the textbook novice sort — see `FRAMEWORK.md` §"Chunks".
 
+The Gate 0 pilot puts a name to what the right carve looks like on this corpus: **decision
+type**. Should we offer this screen; should we restrict this product; how should we organise
+services; what should we prioritise. Each carries its own decision rule, its own standard of
+proof and its own vocabulary, and the cancer site turns out to be almost irrelevant to which
+applies — the two cervical documents have more in common with the other cancers in their
+genre than with each other. None of the four is a document, which is why no amount of tuning
+the community detection will find them: the signal is not in the link graph.
+
 ### Magnitudes — a filter over grounds, not a pass
 
 Of the evidence supporting claims, keep the quantities, each attached to the decision that
@@ -94,6 +102,52 @@ expensive way of restating common knowledge. That is a result we want early and 
 and it is the only defence against building something whose apparent insight is just
 pretraining wearing a citation.
 
+## 2a. Triage — which documents the model reads closely
+
+*Serves: all five, by not polluting them.*
+
+Argument density across a real corpus varies by an order of magnitude, and length is a bad
+proxy for it. `app/corpus/concepts.py:39` sets a flat `TARGET_CONCEPTS_PER_DOCUMENT = 15`
+adjusted only by document length; on the pilot corpus that budgets a 93,000-character
+questionnaire like a 93,000-character argument.
+
+Forcing a fixed yield of argument nodes out of a document that contains no argument does not
+produce a thin result. It produces an invented one — R1's failure mode arriving through the
+back door, since a model asked to find reasoning will always find some.
+
+**Three tiers, not two.**
+
+| Tier | To the wiki | Yields claims | Mined for warrants |
+|---|---|---|---|
+| **Argued** — impact assessments, a legislative case for change | yes | yes | yes |
+| **Claim-only** — plans, strategies, policy summaries, consultation results | yes | yes | no |
+| **Wiki-only** — questionnaires, pure process documents | yes | no | no |
+
+The middle tier is the one that stops this being a crude filter. The 2010–2015 policy paper
+records that bowel screening was extended to ages 70–75 — a dated, attributable claim that
+later documents build on — and contains no reasoning whatever about why. Excluding it loses
+a link in a five-year chain; mining it for warrants manufactures a rationale that was never
+there. It should give up its claims and nothing else.
+
+**Classification is two-stage, and the first stage is free.** Eleven of the thirteen pilot
+documents carry the GOV.UK document type as literally the first line of extracted text —
+*Impact assessment*, *Policy paper*, *Call for evidence outcome*, *Closed call for evidence*.
+Deterministic, no model call.
+
+That gives genre, not density, and the gap is real: three pilot documents are labelled
+*Policy paper* and range from a dense strategy to a seven-page summary with one argued claim
+in it. So stage two is a single cheap call per document returning `decision_type` and a tier,
+run over the title and opening sections rather than the full text. `decision_type` is not
+extra work — §5 R2 needs it to qualify recurrence counts and §6 needs it as the warrant merge
+key, so one pass earns its keep three times.
+
+**Silent exclusion is the risk, so do not let it be silent.** Dropping a document from the
+model is exactly the kind of loss that is invisible in the output — the reasoning that made
+the corpus path opt out of `extractors.MAX_CHARS` rather than truncate. Write the tier and
+the reason for it out as a stage artifact and show them on the run page, which the README
+already treats as the evaluation surface. A wrong "wiki-only" then costs one glance instead
+of a lost finding.
+
 ## 3. Storage
 
 No new Azure infrastructure. Argument nodes, edges and derived layers persist as
@@ -129,7 +183,8 @@ buys nothing.
 | `qualifier` | force: must, should, may, presumably, in most cases |
 | `defeaters` | stated conditions under which the claim lapses |
 | `scope` | jurisdiction, date, population, exceptions |
-| `provenance` | document, passage, author, date |
+| `provenance` | document, passage, author, date — where the claim was *found* |
+| `asserted_by` | whose claim it is: the institution or group, plus `asserted` / `reported` |
 | `basis` | `evidence` / `authority` / `none_found` |
 
 **`warrant_status` has two values, not three.** An earlier draft had `absent` alongside
@@ -146,6 +201,25 @@ credibility with it.
 and *advises* are nearly identical to an embedding model and sharply distinct in law. The
 distinctions between them are a large part of the expertise being captured. See §6 — this
 is not a rule that enforces itself.
+
+**`asserted_by` is not the same as `provenance`, and conflating them corrupts R2.**
+Provenance records where a claim was found. `asserted_by` records whose claim it is. On the
+pilot corpus (`GATE0_PILOT.md`) those come apart three ways in documents that all say DHSC
+on the cover:
+
+- the department asserting something in its own voice
+- the department reporting a conclusion that belongs to another body — "UK NSC recommended",
+  "NICE guidance sets out", "as per HM Treasury Green Book"
+- the department summarising what consultees said — "Results of the National Cancer Plan
+  call for evidence" is 138,000 characters of what 11,918 respondents told it
+
+Without the field, the third kind enters the graph as departmental reasoning and inflates
+every recurrence count with public opinion. The second kind is where the owner of a warrant
+is actually recorded, which is what R2 needs and cannot otherwise get.
+
+The field is affordable because the text nearly always marks it explicitly — "we will", "UK
+NSC concluded", "respondents told us". It is a weaker distinction than claim-versus-grounds
+but a far stronger one than data-versus-warrant, which is the line §4 declines to draw.
 
 ## 5. Operating rules
 
@@ -174,6 +248,22 @@ verbatim; eleven appearances across six of their documents may be one decision, 
 The threshold must be on distinct institutions, and the count travels with any finding
 derived from it.
 
+**Count the institution that owns the warrant, not the one that wrote the document
+(`asserted_by`, not `provenance`).** The pilot corpus is entirely DHSC-authored, so on the
+document-author reading every finding in `GATE0_PILOT.md` counts as one institution and R2
+licenses nothing at all. But the documents themselves attribute their warrants to four
+separate bodies with separate mandates — the harm–benefit rule to UK NSC's evidence review
+criteria, the cost-effectiveness threshold to NICE's HTA methodology, the equality frame to
+the Equality Act's public sector equality duty, the appraisal method to HM Treasury's Green
+Book. Those are the uncoordinated authors R2 is trying to find. The department is the
+courier.
+
+**Recurrence within one decision type is not recurrence across the field.** The pilot's
+first pass took four screening appraisals and concluded that the harm–benefit rule was the
+field's dominant warrant. Read across all thirteen documents it is nearly absent outside
+screening. A recurrence count must be qualified by how many *decision types* it spans, or
+it will confidently report a local convention as a principle of the field.
+
 Note the honest limit: even across institutions, recurrence may be house style rather than
 reasoning (`FRAMEWORK.md` §"The ceiling"). Findings must not overclaim.
 
@@ -197,8 +287,8 @@ claim. Get it wrong and the output is a heap of disconnected fragments — worse
 wiki, not better. This is the failure that killed the previous version at the concept
 level, moved up one layer, and it is not obviously easier here.
 
-**The merge key must be structural, not similarity.** Match exactly on `qualifier` and
-`scope`; use embedding similarity only over `claim` text.
+**The merge key must be structural, not similarity.** Use embedding similarity only over
+text; never let it decide the match on its own.
 
 This needs writing down because the obvious implementation violates §4 by default.
 `app/corpus/consolidate.py` merges by cosine over `text-embedding-3-small` at a 0.68
@@ -206,10 +296,41 @@ threshold, and that machinery is right there and reusable — but it will score 
 / *directs* / *advises* at around 0.95 and flatten precisely the distinction §4 says must
 never be flattened. Reusing the clustering is fine. Reusing it as the merge decision is not.
 
-**Two operations, not one.** Identity merging (two documents assert the same claim) and
-chaining (one node's claim is another's grounds) are different, and only chaining is
-load-bearing. Identity merging is optional — duplicate nodes carrying two provenance
-records are perfectly usable. Gate 0 in §9 measures the right one.
+**Claims and warrants do not share a merge key.** An earlier draft gave one rule — match
+exactly on `qualifier` and `scope` — and applied it to both. On the pilot corpus that rule
+is too strict for one and vacuous for the other:
+
+- **Claims carry heavy scope, and the scope is the content.** Cervical screening is every
+  3 years for 25–49 and every 5 years for 50–64: same claim shape, different population,
+  and the difference *is* the decision. Extended intervals arrived in Scotland in 2020,
+  Wales in 2022 and England in 2025 — same claim, different jurisdiction and date, and
+  "England was five years behind" is a fact a merge would destroy.
+- **Warrants are nearly scopeless.** "Benefits must outweigh harms" carries no jurisdiction,
+  date or population anywhere in thirteen documents, and warrants do not take must/should/may
+  the way claims do. Demanding an exact match on two fields that are almost always empty is
+  a test that always passes.
+
+**Claims: link on scope difference, do not merge across it.** Two nodes asserting the same
+claim under different `scope` stay two nodes, joined by a *same claim, different scope*
+edge. The difference survives, recurrence is still countable by walking the edge, and a
+jurisdictional lag becomes a visible finding instead of a casualty. This dissolves the old
+open question — the choice was never claim-alone versus claim-plus-scope, it was merge
+versus link.
+
+**Warrants: match on warrant text plus decision type; ignore `scope` and `qualifier`.**
+Decision type is the discriminator that scope cannot be here, and §5 R2 needs the same
+lookup, so it is one mechanism serving both.
+
+The cost is node count and query cost. Four UK nations can yield four nodes where one was
+expected, and every recurrence count becomes a graph walk rather than a lookup. Accepted:
+in a corpus where the jurisdictional lag is the interesting part, silently flattening it is
+the worse failure.
+
+**Three operations, not one.** Identity merging (two documents assert the same claim),
+scope-linking (the same claim under different jurisdiction, date or population), and
+chaining (one node's claim is another's grounds). Only chaining is load-bearing — see ADR
+0003, which also records that this ordering is what makes the statement safe. Gate 0 in §9
+measured the right one.
 
 **Fix the contradiction detector before relying on it for edges.** `app/lint.py:331`
 shortlists candidate pairs by vector adjacency at `top_k=3`, so only semantically similar
@@ -259,7 +380,7 @@ among its own authors.
 
 Each gate can stop the build. That is the point of having them.
 
-**Gate 0 — manual pilot. No code.**
+**Gate 0 — manual pilot. No code. → DONE, passed. Results in `GATE0_PILOT.md`.**
 Four documents known to overlap. Extract argument nodes from each by hand. Then two tallies,
 kept separate:
 
@@ -282,15 +403,41 @@ What survives in that case is still worth something: a claim-to-evidence structu
 which single dataset forty decisions are leaning on is itself an audit finding. But §1's
 pitch would need rewriting, and traversal would buy little.
 
-**Gate 1 — extraction quality.** Automated extraction over the same four documents, against
-the hand-built set. Score `claim` and `grounds` separately from `warrant`; warrant recovery
-will be worse and needs its own baseline rather than dragging down one blended number.
+A third tally was added before the pilot ran, because neither of the two above tests what
+Route A in §11 actually depends on:
+
+3. **Does the same jump recur across documents?** Route A's output is "this is relied on
+   eleven times across four institutions and stated nowhere", which needs cross-document
+   recognition of the same unstated step. Route A was advertised as skipping merging; it
+   does not.
+
+**Outcome: all three tallies passed**, on four documents and again on all thirteen. Chain
+length is a median of 3 and chains cross documents — the 2026 National Cancer Plan uses the
+screening impact assessments' conclusions as its premises. The pilot also overturned its own
+first result, corrected R2 (above), added `asserted_by` to §4, and named the carve. Read
+`GATE0_PILOT.md` before Gate 1; it changes what Gate 1 should be scored against.
+
+**Gate 1 — extraction quality.** Automated extraction over the pilot documents, scored
+against the hand-built set in `GATE0_PILOT.md`. Score `claim` and `grounds` separately from
+`warrant`; warrant recovery will be worse and needs its own baseline rather than dragging
+down one blended number.
+
+Add one test the earlier draft did not have, because it is the design's largest untested
+assumption (§13 Q4): **can the same warrant be recognised across documents when it is worded
+differently each time?** The pilot's counts were search-based and therefore only found
+warrants phrased alike — the easy case. Construct the hard case deliberately: the harm–benefit
+rule appears as "benefits would outweigh the harms", "more good than harm", and "maximise the
+benefits they bring, while minimising harm". If extraction plus merging does not put those
+three together, the organising-principles layer does not work and that must surface here, not
+at Gate 2.
 
 **Gate 2 — merging at scale.** Thirty documents. Report node degree and chain length.
-A median chain length of 1 means fragments, not a graph.
+A median chain length of 1 means fragments, not a graph. Also the place where §13 Q5 and Q7
+get their distributions.
 
-**Gate 3 — gap detection.** Produce the question list. Put it to one domain expert. The
-measure is whether the questions were worth their time.
+**Gate 3 — gap detection, and the first real expert contact.** Produce the question list from
+the graph. Put it to one domain expert. The measure is whether the questions were worth their
+time. Per ADR 0003 this is where the expert enters, not earlier.
 
 **Gate 4 — surprises.** Run the no-corpus baseline comparison. If nothing comes back, stop
 and reconsider — see §2.
@@ -307,10 +454,29 @@ arguing; prefer measurement wherever a question is measurable.
 Ordered to match the build, so that at every stage there is a live measure rather than one
 that cannot be run yet.
 
-**Through Gates 0–3 — expert challenge.** Put reconstructions and questions to a domain
-expert. Record confirm / correct / "no, the real reason is X". Corrections are worth more
-than confirmations; track the ratio over time. This is the only criterion available early,
-and it does all the work until Gate 6.
+**Through Gates 1–2 — agreement with the Gate 0 reference set.** `GATE0_PILOT.md` is a
+hand-built reading of all thirteen documents: the two incompatible decision rules, the
+unacknowledged scar, six recurrent warrants with their counts, and the chain-length
+distribution. Score automated extraction against it. Cheap, repeatable, available from day
+one, and it consumes no expert.
+
+**State the limit of this plainly, because it is easy to forget once there is a number.**
+This measures agreement between the machine and one careful outside reader. It does not
+measure truth. The reference set was built by someone who is not a domain expert, from the
+documents alone, and if that reading is wrong in a systematic way then tuning the extractor
+to reproduce it will reproduce the error and nothing here will catch it. That is the
+strongest argument for a short early expert contact — ten questions from the pilot, purely
+to check the questions are the right *kind* — ahead of the real session at Gate 3. Worth
+doing if the goodwill is available; not a blocker if it is not.
+
+**From Gate 3 — expert challenge.** Put reconstructions and questions to a domain expert.
+Record confirm / correct / "no, the real reason is X". Corrections are worth more than
+confirmations; track the ratio over time.
+
+Deliberately not earlier. Per ADR 0003, expert time is the scarce input in this whole
+design — a full corpus run costs about £0.35, and an afternoon with a departing officer
+happens once. Spending it on questions generated before the graph exists spends the scarcest
+input on the weakest questions.
 
 **From Gate 4 — the no-corpus baseline.** Does the artifact contain anything a good model
 did not already know? A hard pass/fail on whether the corpus is contributing at all.
@@ -328,10 +494,46 @@ things, so claim prediction fails uninformatively.
 **Throughout — onboarding.** A new starter answers "why does the UK not screen for prostate
 cancer" by traversal, faster and more completely than by reading the briefs.
 
-## 11. The open question — build order
+## 11. Build order — settled
 
-**This is the decision the grill session has to settle, and it comes before Gate 0, because
-it determines what Gate 0 is for.**
+**Settled in the grill session, after Gate 0. Recorded here with the reasoning; the two
+routes are kept because the argument against Route A's advertised cheapness is the load-
+bearing part.**
+
+**Decision: build the shared pipeline, run both analyses, finish Route B's end first.**
+
+Three things decided it.
+
+*Route A is not the cheap option it was written up as.* §7's own example question — "this
+inference is relied on 11 times across 4 institutions and is stated nowhere" — cannot be
+produced without recognising the same unstated warrant in eleven places. That is identity
+merging on the hardest possible field. And there is no cheaper fallback, because R5's
+sibling R2 says a gap seen once is an author being brisk, so single-document gap-spotting
+licenses nothing. Strip merging out and the output is every place all thirteen documents
+skipped a step: hundreds of items, unranked, indistinguishable from extraction noise.
+
+*The fork was never in the pipeline anyway.* Both routes need the same extraction, and past
+that point they are two queries over one set of nodes — which jumps recur, and which
+conclusions rest on other conclusions. Both are cheap once the nodes exist. The fork is in
+which **end** gets finished: an elicitation loop, or a graph you can walk.
+
+*Expert time is the scarce input; compute is not.* A full corpus run costs about £0.35. An
+afternoon with an officer who is leaving is a one-off. Spending it on questions generated
+before the graph exists spends the scarcest input on the weakest questions. Gate 0 made this
+concrete: the best question the pilot produced — why does screening have to prove net
+benefit while tobacco restriction does not? — was only visible by comparing across
+documents and across decision types. Single-document gap-spotting would not have found it.
+
+Consequence for §6: "identity merging is optional, only chaining is load-bearing" survives,
+but narrowly, and only because Route B's end ships first. If that order is ever reversed,
+§6 has to be rewritten before anything is built.
+
+Recorded as ADR 0003.
+
+---
+
+The original framing is kept below, because the grill should be able to see what was
+decided against.
 
 §7 asserts that the first output is a question list, not a map. If that is true, the build
 order in §9 is wrong, and most of it is not on the critical path.
@@ -355,26 +557,68 @@ day one?"). It is not. It decides whether half the build sequence is necessary.
 
 ## 12. Non-goals and known blind spots
 
-- **Dead options are unrecoverable.** Documents are written by the surviving proposal. The
-  system may detect the scar — an option conspicuously unaddressed — but not what was in it.
+- **Dead options are unrecoverable — but the scar is detectable, and that is now a feature
+  rather than a consolation.** Documents are written by the surviving proposal. The pilot
+  found a scar by hand: the 2023 Major Conditions strategy argues explicitly for moving
+  "away from single disease strategies"; the 2026 National Cancer Plan is one, and does not
+  mention the Major Conditions strategy anywhere. The argument for the abandoned approach
+  survives in the corpus; the argument against it exists nowhere.
+
+  The pattern is mechanical: document A argues X, a later document B does not-X, and no
+  document connects them. That is a graph query over claim, `scope` (date) and contradiction
+  edges — not a judgement call. Build it. It will not recover what was in the dead option,
+  but naming the reversal and its date gives an expert something specific to answer, which
+  is exactly the shape §7 needs.
 - **Confirmation bias at corpus scale.** A structure reconstructed from documents written
-  by the decision-makers will produce a coherent rationale for current policy. The design
-  needs something that hunts the absent counter-argument and currently **has nothing**.
-  This is the largest unresolved weakness in the design and is recorded here rather than
-  solved.
+  by the decision-makers will produce a coherent rationale for current policy. Scar
+  detection is a partial answer and should not be oversold as a full one: it finds
+  reversals *between* documents, and does nothing about an option that was killed before
+  anyone wrote it down. Hunting the genuinely absent counter-argument remains unsolved and
+  is still the largest known weakness in the design.
 - **Reasoning versus house style.** See R2 and `FRAMEWORK.md` §"The ceiling". Tolerable for
   onboarding, not tolerable for published findings.
 - **Not an evaluator.** The system maps what is relied on and where it bottoms out. It does
   not judge whether the arguments are any good.
 - **The wiki is not replaced.** Lookup stays the wiki's job.
 
-## 13. Open questions for the grill
+## 13. Open questions
 
-1. **Build order** — §11. Everything else is downstream of this.
-2. Does a node merge on `claim` alone, or on claim plus scope? Claim alone collapses
-   jurisdictions; both together may prevent any merging at all.
-3. What recurrence threshold, across how many institutions, licenses a finding? Arbitrary
-   until Gate 2 supplies a distribution.
-4. Who owns a correction when one expert disagrees with another expert's elicited answer?
-5. Is a claim-to-evidence structure with no chaining (the Gate 0 failure case in §9) worth
-   shipping on its own?
+**Settled**
+
+1. ~~Build order~~ — settled in §11: shared pipeline, both analyses, Route B's end first.
+2. ~~Is a claim-to-evidence structure with no chaining worth shipping alone?~~ — moot. Gate 0
+   found chaining, including across documents and across five years.
+3. ~~Should §4 record who a claim belongs to?~~ — yes, `asserted_by`. See §4.
+
+**Still open**
+
+4. ~~Does a node merge on `claim` alone, or on claim plus scope?~~ — dissolved in §6. The
+   choice was merge versus link, not which key to merge on. Claims link across scope;
+   warrants merge on text plus decision type.
+
+   What remains untested underneath it: **can warrants worded differently be recognised as
+   the same warrant at all?** Gate 0's recurrence counts were search-based, so they only
+   found warrants phrased similarly — the easy case. This is the largest untested assumption
+   in the design, and Gate 1 should be scored against it directly rather than leaving it to
+   Gate 2.
+5. What recurrence threshold licenses a finding? Still arbitrary until Gate 2 supplies a
+   distribution — but the count must now be qualified by how many **decision types** it
+   spans, not just how many institutions (§5 R2).
+6. Who owns a correction when one expert disagrees with another expert's elicited answer?
+7. **Is asymmetry a better detector than absence?** Hypothesis from Gate 0, explicitly *not*
+   adopted: the most useful warrants may be the ones stated in one place and relied on
+   silently elsewhere, because the single statement is what makes the silent uses
+   recognisable and the finding defensible. Rests on a comparison of two categories with
+   three and one members, which is not enough to decide anything. Gate 2 supplies the
+   distribution that would settle it. If it holds, `warrant_status` becomes a property of
+   the merged warrant (`stated_somewhere` / `stated_nowhere`) rather than of a node, and §6
+   loses "identity merging is optional".
+8. ~~How should extraction budget be allocated across a corpus of uneven argument density?~~
+   — settled in §2a. Not a budget question: a triage question. Three tiers, classified from
+   the free GOV.UK type line plus one cheap call, with the tier recorded as a reviewable
+   artifact.
+
+   Left open underneath it: **what fraction of a corpus has to be argued before this design
+   is worth running at all?** On the pilot corpus roughly a third is claim-only or wiki-only.
+   At two thirds the graph would be thin enough to question the premise. Gate 2's thirty
+   documents give the first honest read.

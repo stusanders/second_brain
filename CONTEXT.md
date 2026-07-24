@@ -96,13 +96,45 @@ _Avoid_: hole, missing link, absence
 **Elicited answer**:
 A Warrant supplied by a named person in response to a Gap, rather than found in text.
 
+**Asserter**:
+Whose Claim it is — the institution or group the Claim belongs to, and whether the document
+is asserting it or reporting it. Distinct from provenance, which records only where the
+Claim was found.
+_Avoid_: author, source, owner
+_Note_: a document can assert in its own voice, report another body's conclusion, or
+summarise what consultees said. All three carry the same provenance and different Asserters.
+
+**Decision type**:
+The kind of decision a document is making — whether to offer a screen, whether to restrict
+a product, how to organise services, what to prioritise. Each carries its own decision rule
+and standard of proof.
+_Avoid_: document type, genre, category
+_Note_: the corpus evidence is that Warrants recur strongly within a Decision type and
+weakly across the field, so a recurrence count means little without one attached.
+
+**Tier**:
+How closely the model reads a document: **argued** (mined for Warrants), **claim-only**
+(yields Claims, not Warrants), **wiki-only** (lookup material, no Argument nodes).
+_Avoid_: quality, relevance, priority
+_Note_: every document reaches the wiki whatever its Tier. A Tier restricts what the model
+takes from it, never whether it is stored or searchable.
+
+**Scar**:
+A reversal that no document acknowledges — one document argues a position, a later one acts
+against it, and nothing connects them.
+_Avoid_: contradiction, inconsistency, gap
+_Note_: distinct from an **Edge of the model**, which is disagreement the corpus states.
+A Scar is disagreement the corpus is silent about.
+
 ## Relationships
 
 - A **Document** yields many **Concepts**; **Concepts** consolidate into **Pages**
 - A **Document** yields many **Argument nodes**; each cites one or more **Passages**
 - An **Argument node** has one **Claim**, one set of **Grounds**, and at most one **Warrant**
 - **Justification edges** connect **Argument nodes**; one node's **Claim** is another's **Grounds**
-- A **Warrant** recurring across enough institutions becomes an **Organising principle**
+- A **Warrant** recurring across enough institutions, and across more than one **Decision
+  type**, becomes an **Organising principle**
+- The institution counted is the **Asserter**, not whoever published the document
 - **Organising principles** determine the **Chunks** — they are not chosen independently
 - A **Gap** becomes a question; a question may become an **Elicited answer**
 - **Pages** sit beneath the model as the lookup and provenance layer, not as part of it
@@ -142,6 +174,9 @@ A Warrant supplied by a named person in response to a Gap, rather than found in 
   document) and "trustworthy as a model". Resolved: these are different. See
   `docs/FRAMEWORK.md` §"What grounded means here". Conflating them is what collapsed two
   earlier designs into an index.
+- **"Source"** meant both the document a Claim was found in and the body whose Claim it is.
+  Resolved: the first is provenance, the second is the **Asserter**. Every document in the
+  pilot corpus is published by DHSC and most of the Warrants belong to someone else.
 - **"Tension"** was used for both a genuine disagreement between sources and a surface
   contradiction dissolved by an unstated principle. Resolved: the first is an **Edge of the
   model**; the second is evidence for an **Organising principle**. The word "tension" is

@@ -6,6 +6,8 @@ A persistent, AI-maintained knowledge wiki. Private individual wikis; selected p
 
 **Being designed** (`docs/FRAMEWORK.md`, `docs/MODEL_SPEC.md`): the first real corpus run answered the MVP's question with a qualified no. The pipeline produces ~270 accurate, well-sourced pages from which nothing can be predicted — a good index, not a model of the domain. `FRAMEWORK.md` sets out what would count as solving that (a mental model, in a specific and testable sense) and `MODEL_SPEC.md` how to build it. Nothing in `MODEL_SPEC.md` is built yet; the wiki layer underneath it stands.
 
+**Gate 0 is done and passed** (`docs/GATE0_PILOT.md`): all thirteen corpus documents read by hand before writing any code, to find out whether the design was worth building. Arguments chain, and they chain *across* documents — the 2026 National Cancer Plan uses the screening impact assessments' conclusions as its premises. The pilot also overturned its own first result, which is why it is written up rather than summarised: reading four similar documents produced a confident finding that reading all thirteen destroyed.
+
 Terminology across all of these is defined in `CONTEXT.md`; decisions that were hard to reverse are in `docs/adr/`.
 
 ## Architecture in one paragraph

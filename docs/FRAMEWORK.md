@@ -76,6 +76,12 @@ carve it that way.
 
 > **Test:** a reader can recite the top level after one pass.
 
+Tested against the corpus rather than asserted, and it held: reasoning in these thirteen
+documents sorts by **decision type** — should we offer this screen, should we restrict this
+product, how should we organise services, what should we prioritise — and barely at all by
+which cancer it concerns. The two cervical documents have more in common with the other
+cancers in their genre than with each other. See `docs/GATE0_PILOT.md`.
+
 ### 2. Organising principles
 
 The reasons that keep turning up underneath decisions. The thing that, once you see it,
