@@ -1,0 +1,121 @@
+{# Shared corpus upload control: drag a folder (or files) in, or browse.
+
+   Expects: action, button_label. Include inside nothing — it renders its own form.
+
+   Folder drops go through webkitGetAsEntry() and are walked recursively, because
+   a policy corpus arrives as a directory tree, not a hand-picked list. Files are
+   filtered to supported types in the browser so the count you see before
+   uploading is the count that gets processed — a folder of 200 files typically
+   carries .DS_Store, images and spreadsheets the extractors can't read, and
+   silently dropping them server-side would make the document count in the run
+   inexplicable. #}
+<form method="post" action="{{ action }}" enctype="multipart/form-data" class="upload-form">
+  <div class="dropzone" tabindex="0" role="button"
+       aria-label="Drag a folder here, or click to browse">
+    <p class="dz-idle"><strong>Drag a folder here</strong><br>
+      <span class="muted">or click to choose files · folders are read recursively</span></p>
+    <p class="dz-busy muted" hidden>Reading folder…</p>
+    <p class="dz-summary" hidden></p>
+  </div>
+
+  {# Kept in the DOM (visually hidden) so the form still works without JS. #}
+  <input type="file" name="files" multiple required class="dz-input">
+  <p class="dz-skipped muted" hidden></p>
+
+  <button type="submit">{{ button_label }}</button>
+</form>
+
+<style>
+  .upload-form .dropzone { border:2px dashed var(--border); border-radius:10px;
+    padding:1.6rem 1rem; text-align:center; cursor:pointer; transition:border-color .15s;
+    margin-bottom:.7rem; }
+  .upload-form .dropzone:hover, .upload-form .dropzone:focus-visible { border-color:var(--accent); }
+  .upload-form .dropzone.over { border-color:var(--accent);
+    background:color-mix(in srgb, var(--accent) 8%, transparent); }
+  .upload-form .dropzone p { margin:0; }
+  .upload-form.js .dz-input { position:absolute; width:1px; height:1px;
+    opacity:0; pointer-events:none; }
+</style>
+
+<script>
+(() => {
+  const form = document.currentScript.closest("form") ||
+               document.querySelector(".upload-form:not(.js)");
+  if (!form) return;
+  const zone = form.querySelector(".dropzone");
+  const input = form.querySelector(".dz-input");
+  const idle = form.querySelector(".dz-idle");
+  const busy = form.querySelector(".dz-busy");
+  const summary = form.querySelector(".dz-summary");
+  const skippedEl = form.querySelector(".dz-skipped");
+  form.classList.add("js");
+
+  // Mirrors app.ingest.extractors.extract_file. Kept in step by hand; a wrong
+  // entry here only means a file is offered and then rejected server-side, not
+  // silent loss.
+  const SUPPORTED = [".pdf", ".docx", ".pptx", ".xlsx", ".xlsm", ".csv",
+                     ".txt", ".md", ".markdown"];
+  const supported = (name) => SUPPORTED.some(e => name.toLowerCase().endsWith(e));
+
+  async function walk(entry, out) {
+    if (!entry) return;
+    if (entry.isFile) {
+      out.push(await new Promise((res, rej) => entry.file(res, rej)));
+      return;
+    }
+    if (entry.isDirectory) {
+      const reader = entry.createReader();
+      // readEntries returns at most 100 per call, so it must be drained.
+      for (;;) {
+        const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+        if (!batch.length) break;
+        for (const e of batch) await walk(e, out);
+      }
+    }
+  }
+
+  function apply(files) {
+    const keep = files.filter(f => supported(f.name) && f.size > 0);
+    const dropped = files.length - keep.length;
+
+    const dt = new DataTransfer();
+    keep.forEach(f => dt.items.add(f));
+    input.files = dt.files;
+
+    idle.hidden = keep.length > 0;
+    summary.hidden = keep.length === 0;
+    summary.innerHTML = "<strong>" + keep.length + " document" +
+      (keep.length === 1 ? "" : "s") + " ready</strong>" +
+      '<br><span class="muted">click to choose different files</span>';
+    skippedEl.hidden = dropped === 0;
+    skippedEl.textContent = dropped + " file" + (dropped === 1 ? "" : "s") +
+      " skipped — unsupported type or empty.";
+  }
+
+  zone.addEventListener("click", () => input.click());
+  zone.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); }
+  });
+  input.addEventListener("change", () => apply([...input.files]));
+
+  ["dragenter", "dragover"].forEach(ev =>
+    zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(ev =>
+    zone.addEventListener(ev, e => { e.preventDefault(); zone.classList.remove("over"); }));
+
+  zone.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    const items = [...(e.dataTransfer.items || [])]
+      .map(i => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null))
+      .filter(Boolean);
+
+    if (!items.length) { apply([...(e.dataTransfer.files || [])]); return; }
+
+    busy.hidden = false; idle.hidden = true;
+    const found = [];
+    for (const entry of items) await walk(entry, found);
+    busy.hidden = true;
+    apply(found);
+  });
+})();
+</script>

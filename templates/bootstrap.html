@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Build this wiki{% endblock %}
+{% block content %}
+<!-- Framing matters here (MVP spec): this is the first slice of something that
+     compounds, not a document-to-wiki converter. The entry screen is where that
+     expectation gets set, so the copy says it before anyone sees output. -->
+{% set space = user.teams.get(owner, "Team") if tier == "team" else "your personal space" %}
+<h1>Build {{ space if tier == "team" else "your personal wiki" }} from documents</h1>
+
+<p class="muted">Building into <strong>{{ space }}</strong>
+   <code>/{{ tier }}/{{ owner }}/</code></p>
+
+<p>This space is empty. Hand over documents your team already has — reports, papers,
+   briefings, decks, spreadsheets — and it will read them, work out what concepts they
+   actually cover, and write a linked wiki with a map of how the material fits together.</p>
+
+{# Every empty scope shows this same page, so it is easy to start a long, paid
+   corpus build in the wrong one. Naming the target and offering the switch up
+   front is cheaper than discovering it forty documents later. #}
+{% if tier == "individual" and user.teams %}
+<div class="card" style="border-color:#c77">
+  <p>You're in <strong>your personal space</strong>. A shared corpus usually belongs in a team
+     space instead — building here means only you can see it.</p>
+  <p class="muted">Switch to:
+    {% for gid, name in user.teams.items() %}
+      <a href="/team/{{ gid }}/">{{ name }}</a>{{ " · " if not loop.last }}
+    {% endfor %}
+  </p>
+</div>
+{% endif %}
+
+<p class="muted">Nobody has to change how they work to start: these are documents you already have.
+   From here on the wiki maintains and extends itself as new material arrives — this first
+   pass is the starting point, not the product.</p>
+
+<div class="card">
+  <h3>Add the corpus</h3>
+  {% with action = "/" ~ tier ~ "/" ~ owner ~ "/bootstrap", button_label = "Build " ~ space %}
+    {% include "_upload.html" %}
+  {% endwith %}
+  <p class="muted">PDF, Word, PowerPoint, Excel, CSV, text or markdown. What makes a good
+     corpus is the same concepts recurring across many documents — that recurrence is what
+     gets collapsed into shared pages. Unrelated material has nothing to merge.</p>
+</div>
+
+<div class="card">
+  <h3>What happens next</h3>
+  <ol class="muted" style="font-size:.9rem">
+    <li><strong>Read</strong> — each document is stored unchanged and read in full.</li>
+    <li><strong>Extract</strong> — the concepts each document covers, with the passages evidencing them.</li>
+    <li><strong>Consolidate</strong> — concepts appearing across many documents become one page those documents feed, not one page each.</li>
+    <li><strong>Write</strong> — each page is written once, with every relevant source in view.</li>
+    <li><strong>Map</strong> — pages are grouped by how they actually link to each other.</li>
+    <li><strong>Review</strong> — predicted gaps in the corpus, plus any contradictions between your sources.</li>
+  </ol>
+  <p class="muted">You can watch it work and inspect what it decided at every stage.</p>
+</div>
+
+{% if last_run and last_run.state == "failed" %}
+<div class="card" style="border-color:#c77">
+  <h3>The last run didn't finish</h3>
+  <p class="muted">{{ last_run.error }}</p>
+  <p><a href="/{{ tier }}/{{ owner }}/pipeline/{{ last_run.id }}">See where it stopped</a></p>
+</div>
+{% endif %}
+{% endblock %}

@@ -21,6 +21,21 @@
        font-family="system-ui,sans-serif" role="img" aria-label="Radial knowledge map"></svg>
 </div>
 
+{% if map.frontier %}
+<div class="card">
+  <h3>Predicted gaps <span class="muted">(not pages — nothing here is in the wiki)</span></h3>
+  <p class="muted">Territory this material implies but doesn't cover. These are predictions with no
+     source behind them, so they are shown on the map only and never appear in the wiki,
+     search or an export.</p>
+  <ul>
+    {% for f in map.frontier %}
+      <li>{{ f.title }}{% if f.near %} <span class="muted">· near {{ f.near }}</span>{% endif %}
+        {% if f.why %}<br><span class="muted">{{ f.why }}</span>{% endif %}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 {% if map.unplaced %}
 <div class="card">
   <h3>Unplaced pages <span class="muted">(nothing links to them yet)</span></h3>
@@ -98,7 +113,30 @@
       node.addEventListener("click", () => renderFocus(i));
       svg.appendChild(node);
     });
+    renderFrontier(R);
     svg.appendChild(hub());
+  }
+
+  // Predicted gaps: territory the corpus implies but doesn't cover. Drawn
+  // beyond the community ring, dashed and greyed, deliberately not clickable —
+  // there is no page behind one, and there never will be unless a document
+  // arrives that covers it.
+  function renderFrontier(R) {
+    const frontier = MAP.frontier || [];
+    if (!frontier.length) return;
+    const FR = R + 105;
+    frontier.forEach((f, i) => {
+      const a = (i / frontier.length) * 2 * Math.PI - Math.PI / 2 + Math.PI / frontier.length;
+      const x = CX + FR * Math.cos(a), y = CY + FR * Math.sin(a);
+      const g = el("g", {});
+      const title = el("title", {});
+      title.textContent = f.why ? f.title + " — " + f.why : f.title;
+      g.appendChild(title);
+      g.appendChild(el("circle", { cx: x, cy: y, r: 9, fill: "none", stroke: muted,
+        "stroke-width": 1.5, "stroke-dasharray": "3 3" }));
+      g.appendChild(label(x, y + 22, f.title, muted, 10));
+      svg.appendChild(g);
+    });
   }
 
   function renderFocus(idx) {

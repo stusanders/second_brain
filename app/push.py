@@ -110,5 +110,7 @@ def confirm_push(changeset: wiki.Changeset, user: User, selected: set[int] | Non
     return pages
 
 
-def discard_changeset(changeset_id: str) -> None:
-    wiki.discard_changeset(changeset_id)
+def discard_changeset(changeset: wiki.Changeset) -> None:
+    """Takes a resolved changeset, not a bare id, so the caller has already
+    passed the ownership check in get_changeset()."""
+    wiki.discard_changeset(changeset.id, changeset.user_id)

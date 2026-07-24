@@ -142,3 +142,25 @@ def build_map(tier: str, owner: str) -> dict:
 def get_or_build_map(tier: str, owner: str) -> dict:
     """Cached map if present, otherwise build (and cache) it once."""
     return load_map(tier, owner) or build_map(tier, owner)
+
+
+def save_frontier(tier: str, owner: str, entries: list[dict]) -> dict | None:
+    """Attach predicted-gap entries to the cached map artifact.
+
+    The frontier lives here and nowhere else, deliberately (docs/MVP_SPEC.md):
+    it never enters the wiki, the index, search or export. A frontier entry is a
+    prediction with no source document behind it, and this wiki's claim to being
+    trustworthy is that every page traces back to an immutable source. Keeping
+    the entries inside a non-indexed map blob makes that structural rather than
+    a rule someone has to remember.
+
+    `build_map` rewrites the artifact wholesale, so a regenerated map drops the
+    frontier until it is predicted again — correct, since a stale frontier over
+    a changed page set would be misleading.
+    """
+    artifact = load_map(tier, owner)
+    if artifact is None:
+        return None
+    artifact["frontier"] = entries
+    blob_store.write_text(_map_path(tier, owner), json.dumps(artifact, indent=2))
+    return artifact

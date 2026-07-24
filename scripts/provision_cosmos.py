@@ -17,7 +17,7 @@ they're reachable with the app's actual runtime credentials.
 Cosmos holds only the derived index (page_index, version_index, embeddings,
 ingest_log) — see docs/BUILD_SPEC.md storage model. Blob Storage (wiki +
 sources containers) is the canonical store; if Cosmos is ever wiped, run
-`app.abstractions.reindex()` per scope to rebuild it from blob.
+`scripts/reindex.py` per scope to rebuild it from blob.
 """
 
 from app import blob_store

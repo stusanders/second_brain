@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ "Personal" if tier == "individual" else "Team" }} wiki{% endblock %}
 {% block content %}
+{# Landing page carries the MVP's core only: the pages, the map, the findings,
+   and a way to add documents. Everything the MVP defers (ingest modes, the
+   schema doc, push) or treats as secondary (query, export, the ingest log,
+   index rebuild) is still reachable, but collapsed — the spec's framing risk is
+   that this reads as a document converter or a chatbot, and whatever the
+   landing page foregrounds is what people will think the product is. #}
 <h1>{{ "Personal wiki" if tier == "individual" else user.teams.get(owner, "Team") ~ " wiki" }}</h1>
 
 <form method="get" action="/{{ tier }}/{{ owner }}/">
@@ -18,47 +24,72 @@
   </div>
 {% endif %}
 
-<div class="cols">
-  <div>
-    <h2>Pages</h2>
-    {% if pages %}
-      <ul>
-      {% for p in pages %}
-        <li><a href="/{{ tier }}/{{ owner }}/page/{{ p.id }}">{{ p.title }}</a>
-          {% if p.title == index_title %}<span class="muted">(generated)</span>{% endif %}</li>
-      {% endfor %}
-      </ul>
-    {% else %}
-      <p class="muted">No pages yet{% if tier == "individual" %} — drop a source to get started{% endif %}.</p>
-    {% endif %}
-    <p><a href="/{{ tier }}/{{ owner }}/contents">Contents</a> ·
-       <a href="/{{ tier }}/{{ owner }}/map">Map</a> ·
-       <a href="/{{ tier }}/{{ owner }}/query">Ask a question</a> ·
-       <a href="/{{ tier }}/{{ owner }}/log">Ingest log</a> ·
-       <a href="/{{ tier }}/{{ owner }}/schema">Schema doc</a> ·
-       <a href="/{{ tier }}/{{ owner }}/lint">Lint queue{% if lint_counts.total %} ({{ lint_counts.total }}){% endif %}</a> ·
-       <a href="/{{ tier }}/{{ owner }}/export">Export wiki</a></p>
-  </div>
+<p style="margin:1rem 0">
+  <a href="/{{ tier }}/{{ owner }}/map"><strong>Map</strong></a> ·
+  <a href="/{{ tier }}/{{ owner }}/contents">Contents</a> ·
+  <a href="/{{ tier }}/{{ owner }}/lint">Findings{% if lint_counts.total %}
+    ({{ lint_counts.total }}){% endif %}</a>
+</p>
 
-  {% if tier == "individual" %}
-  <div>
-    <h2>Ingest</h2>
-    <form method="post" action="/ingest" enctype="multipart/form-data">
-      <p>
-        <span id="mode-toggle" class="mode-toggle" data-mode="manual" tabindex="0"
-              title="Click or press 'm' to toggle">Mode: <strong id="mode-label">manual</strong></span>
-        <input type="hidden" name="mode" id="mode-input" value="manual">
-      </p>
-      <p><input type="file" name="files" multiple></p>
-      <p><input type="url" name="url" placeholder="…or paste an article/PDF URL"></p>
-      <p><textarea name="pasted" rows="4" placeholder="…or paste raw text"></textarea></p>
-      <button type="submit">Ingest</button>
-    </form>
-    <p class="muted">Manual: discussion + approval per source. Automatic: direct write, no gate.
-       Batches are always processed per-source.</p>
-  </div>
+<h2>Pages</h2>
+{% if pages %}
+  <ul>
+  {% for p in pages %}
+    <li><a href="/{{ tier }}/{{ owner }}/page/{{ p.id }}">{{ p.title }}</a>
+      {% if p.title == index_title %}<span class="muted">(generated)</span>{% endif %}</li>
+  {% endfor %}
+  </ul>
+{% else %}
+  <p class="muted">No pages yet.</p>
+{% endif %}
+
+<div class="card">
+  <h3>Add documents</h3>
+  <p class="muted">Re-runs the pipeline over the whole corpus and rewrites every page.
+     Previous versions are kept in each page's history.</p>
+  {% with action = "/" ~ tier ~ "/" ~ owner ~ "/bootstrap",
+          button_label = "Rebuild from documents" %}
+    {% include "_upload.html" %}
+  {% endwith %}
+  {% if last_run %}
+    <p class="muted" style="margin-top:.6rem">
+      Last run {{ last_run.started_at[:16].replace("T", " ") }} ·
+      <a href="/{{ tier }}/{{ owner }}/pipeline/{{ last_run.id }}">what it decided</a>
+    </p>
   {% endif %}
 </div>
+
+<details style="margin-top:1.5rem">
+  <summary class="muted">More</summary>
+  <p style="margin-top:.6rem">
+    <a href="/{{ tier }}/{{ owner }}/query">Ask a question</a> ·
+    <a href="/{{ tier }}/{{ owner }}/log">Ingest log</a> ·
+    <a href="/{{ tier }}/{{ owner }}/schema">Schema doc</a> ·
+    <a href="/{{ tier }}/{{ owner }}/export">Export wiki</a>
+  </p>
+  <form method="post" action="/{{ tier }}/{{ owner }}/reindex">
+    <button type="submit" class="secondary">Rebuild index</button>
+    <span class="muted">Rebuilds the search index from the stored markdown.
+      Never changes page content.</span>
+  </form>
+
+  {% if tier == "individual" %}
+  <h3 style="margin-top:1.2rem">Ingest a single source</h3>
+  <p class="muted">The full spec's per-source ingest path, not the corpus pipeline —
+     one page per source, with a discussion and approval step in manual mode.</p>
+  <form method="post" action="/ingest" enctype="multipart/form-data">
+    <p>
+      <span id="mode-toggle" class="mode-toggle" data-mode="manual" tabindex="0"
+            title="Click or press 'm' to toggle">Mode: <strong id="mode-label">manual</strong></span>
+      <input type="hidden" name="mode" id="mode-input" value="manual">
+    </p>
+    <p><input type="file" name="files" multiple></p>
+    <p><input type="url" name="url" placeholder="…or paste an article/PDF URL"></p>
+    <p><textarea name="pasted" rows="4" placeholder="…or paste raw text"></textarea></p>
+    <button type="submit">Ingest</button>
+  </form>
+  {% endif %}
+</details>
 
 <script>
   const toggle = document.getElementById("mode-toggle");

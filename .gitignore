@@ -219,3 +219,9 @@ __marimo__/
 
 # Claude Code personal/local overrides
 .claude/settings.local.json
+# Git worktrees are created under .claude/worktrees — never commit them
+.claude/worktrees/
+
+# Source corpus for pipeline evaluation. Large binary PDFs; kept out of git
+# deliberately, since they are test input rather than project content.
+cancer_policy_docs/

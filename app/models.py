@@ -20,10 +20,14 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Tier = Literal["individual", "team"]
-ChangeType = Literal["ingest", "merge_append", "manual_edit", "derived_view_regen"]
+ChangeType = Literal["ingest", "merge_append", "manual_edit", "derived_view_regen", "reindex"]
 IngestMode = Literal["manual", "automatic"]
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+# [[Title]] wikilinks. Lives here rather than in app.wiki so the abstraction
+# layer can resolve links during reindex() without importing business logic.
+WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)\]\]")
 
 
 def now_iso() -> str:
@@ -98,6 +102,11 @@ class VersionIndex(BaseModel):
     timestamp: str = Field(default_factory=now_iso)
     change_type: ChangeType
     author_id: str
+    # Blob path of the raw source that triggered this version, when there was
+    # one. Feeds the per-page chronological history view, which the build spec
+    # requires to show each version's "date, triggering source, and what
+    # changed" — the read-side fix for the individual tier having no log.
+    source_ref: str = ""
 
 
 class Embedding(BaseModel):

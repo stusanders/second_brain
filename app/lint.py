@@ -31,6 +31,7 @@ so this queue is never mistaken for wiki content.
 """
 
 import json
+import threading
 from dataclasses import asdict, dataclass, field
 from typing import Literal
 
@@ -99,6 +100,67 @@ def _load(tier: str, owner: str) -> dict:
 
 def _save(tier: str, owner: str, data: dict) -> None:
     blob_store.write_text(_queue_path(tier, owner), json.dumps(data, indent=2))
+
+
+# ------------------------------------------------------------- background run
+
+# A lint pass over a corpus wiki makes dozens of model calls and far outruns an
+# HTTP request. It runs on a background thread and reports through the same
+# queue blob the page already reads, so the page can show "running" and poll
+# rather than hanging on a spinning request.
+_lint_threads: dict[str, threading.Thread] = {}
+
+
+def _run_flag_path(tier: str, owner: str) -> str:
+    return f"{tier}/{owner}/_lint/running.json"
+
+
+def lint_status(tier: str, owner: str) -> dict | None:
+    """Live status of a background lint pass, or None if none is running or the
+    last one finished."""
+    raw = blob_store.read_text(_run_flag_path(tier, owner))
+    return json.loads(raw) if raw else None
+
+
+def _set_lint_status(tier: str, owner: str, status: dict | None) -> None:
+    if status is None:
+        blob_store.delete(_run_flag_path(tier, owner))
+    else:
+        blob_store.write_text(_run_flag_path(tier, owner), json.dumps(status))
+
+
+def start_lint(tier: str, owner: str, user, max_judgment_pages: int | None = None) -> None:
+    """Kick off a lint pass on a background thread. No-op if one is already
+    running for this scope, so a double-click can't launch two."""
+    existing = lint_status(tier, owner)
+    if existing and existing.get("state") == "running":
+        return
+    _set_lint_status(tier, owner, {"state": "running", "started_at": now_iso()})
+
+    def _work() -> None:
+        try:
+            run_lint(
+                tier,
+                owner,
+                get_lint_mode(tier, owner),
+                user,
+                max_judgment_pages=max_judgment_pages,
+            )
+            _set_lint_status(tier, owner, None)
+        except Exception as e:  # noqa: BLE001 — background thread; must not die silently
+            _set_lint_status(tier, owner, {"state": "failed", "error": f"{type(e).__name__}: {e}"})
+
+    thread = threading.Thread(target=_work, daemon=True, name=f"lint-{tier}-{owner}")
+    _lint_threads[f"{tier}/{owner}"] = thread
+    thread.start()
+
+
+def wait_for_lint(tier: str, owner: str, timeout: float = 120.0) -> None:
+    """Block until a scope's lint thread finishes — for tests, not request
+    handlers."""
+    thread = _lint_threads.get(f"{tier}/{owner}")
+    if thread:
+        thread.join(timeout)
 
 
 def get_lint_mode(tier: str, owner: str) -> LintMode:
@@ -266,11 +328,14 @@ def _find_missing_xrefs_and_stubs(scope: str) -> tuple[list[LintFinding], list[L
 # --------------------------------------------------------- judgment checks
 
 
-def _find_contradictions_and_staleness(scope: str, schema_ctx: str) -> list[LintFinding]:
+def _find_contradictions_and_staleness(
+    scope: str, schema_ctx: str, max_pages: int | None = None
+) -> list[LintFinding]:
     """Two-stage, same pattern as push.py's conflict check: vector shortlist
     (cheap) narrows candidates, LLM reasoning pass (expensive) only runs
     against that shortlist — never O(n^2) over the whole wiki."""
-    pages = [p for p in ab.list_pages(scope) if p.title != wiki.INDEX_TITLE][:MAX_JUDGMENT_PAGES]
+    cap = max_pages or MAX_JUDGMENT_PAGES
+    pages = [p for p in ab.list_pages(scope) if p.title != wiki.INDEX_TITLE][:cap]
     findings: list[LintFinding] = []
     checked_pairs: set[frozenset[str]] = set()
     for p in pages:
@@ -411,7 +476,9 @@ def dismiss_finding(tier: str, owner: str, finding_id: str) -> None:
     _set_status(tier, owner, finding_id, "dismissed")
 
 
-def run_lint(tier: str, owner: str, mode: LintMode, user: User) -> dict:
+def run_lint(
+    tier: str, owner: str, mode: LintMode, user: User, max_judgment_pages: int | None = None
+) -> dict:
     """Run every check, then either apply mechanical findings directly
     (automatic mode) or queue everything for review (manual mode, or any
     judgment finding regardless of mode).
@@ -421,16 +488,21 @@ def run_lint(tier: str, owner: str, mode: LintMode, user: User) -> dict:
     still have no fix path and stay queued. This run also doubles as the
     build spec's "regenerated on a schedule" cadence for derived views —
     bounded to MAX_DERIVED_VIEW_PAGES pages per pass, prioritizing pages a
-    missing_xref finding didn't already cover this run."""
+    missing_xref finding didn't already cover this run.
+
+    `max_judgment_pages` overrides MAX_JUDGMENT_PAGES for one run. The default
+    cap exists for per-ingest cost discipline; a one-shot corpus build wants
+    every page checked, since surfacing contradictions across the whole corpus
+    is the point of running lint there at all."""
     scope = make_partition_key(tier, owner)  # type: ignore[arg-type]
     schema_ctx = schema.context_block(tier, owner)
 
     orphans = _find_orphans(scope)
     xrefs, stubs = _find_missing_xrefs_and_stubs(scope)
     mechanical = orphans + xrefs + stubs
-    judgment = _find_contradictions_and_staleness(scope, schema_ctx) + _find_data_gaps(
-        scope, schema_ctx
-    )
+    judgment = _find_contradictions_and_staleness(
+        scope, schema_ctx, max_pages=max_judgment_pages
+    ) + _find_data_gaps(scope, schema_ctx)
 
     applied = 0
     if mode == "automatic":

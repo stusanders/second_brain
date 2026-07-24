@@ -1,16 +1,17 @@
 """Ingest pipeline: manual (discussion + approval) and automatic modes.
 
 Batch drops are always processed per-source, never combined (build spec).
-Manual-mode sessions are held in process memory — acceptable for a
-single-replica POC; a session dies with the container, nothing durable is
-lost (the source can simply be re-dropped).
+Manual-mode sessions are persisted through `app.review_store` (non-indexed
+blobs), so a discussion survives a container restart or a request landing on
+a different replica — both of which the Container Apps deployment shape makes
+routine.
 """
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 from app import abstractions as ab
-from app import blob_store, schema, wiki
+from app import blob_store, review_store, schema, wiki
 from app.ingest.extractors import ExtractedSource
 from app.models import IngestLogEntry, User, make_partition_key
 
@@ -94,17 +95,39 @@ class ManualSession:
     id: str
     user_id: str
     source: ExtractedSource
+    source_ref_id: str = ""  # blob path of the immutable raw source
     messages: list[dict] = field(default_factory=list)
     proposed_title: str | None = None
     proposed_body: str | None = None
-    changeset: wiki.Changeset | None = None
+    changeset_id: str | None = None
 
 
-_sessions: dict[str, ManualSession] = {}
+def _session_payload(session: ManualSession) -> dict:
+    """`source.raw_bytes` is deliberately dropped: the verbatim original is
+    already in the immutable sources container (see start_manual_session), and
+    round-tripping megabytes of base64 through the session blob on every
+    discussion turn would be pure waste."""
+    payload = asdict(session)
+    payload["source"] = {**payload["source"], "raw_bytes": b""}
+    payload["source"].pop("raw_bytes")
+    return payload
+
+
+def _save_session(session: ManualSession) -> None:
+    review_store.save("sessions", session.user_id, session.id, _session_payload(session))
 
 
 def start_manual_session(source: ExtractedSource, user: User) -> ManualSession:
-    session = ManualSession(id=uuid.uuid4().hex, user_id=user.id, source=source)
+    # Store the raw source now rather than at proposal time. The build spec
+    # makes the raw store immutable and provenance a hard requirement, and a
+    # source the user actually dropped is worth keeping even if the discussion
+    # is later abandoned. It also keeps the persisted session small.
+    session = ManualSession(
+        id=uuid.uuid4().hex,
+        user_id=user.id,
+        source=source,
+        source_ref_id=_store_raw_source(source, user),
+    )
     session.messages = [
         {
             "role": "system",
@@ -121,19 +144,33 @@ def start_manual_session(source: ExtractedSource, user: User) -> ManualSession:
     ]
     reply = ab.call_model_chat(session.messages, max_tokens=600)
     session.messages.append({"role": "assistant", "content": reply})
-    _sessions[session.id] = session
+    _save_session(session)
     return session
 
 
 def get_session(session_id: str, user: User) -> ManualSession | None:
-    session = _sessions.get(session_id)
-    return session if session and session.user_id == user.id else None
+    """Ownership is structural — the blob path is built from the caller's own
+    user id, so another user's session is unreachable, not merely rejected."""
+    payload = review_store.load("sessions", user.id, session_id)
+    if payload is None:
+        return None
+    return ManualSession(
+        source=ExtractedSource(**payload.pop("source")),
+        **payload,
+    )
+
+
+def get_changeset(session: ManualSession, user: User) -> wiki.Changeset | None:
+    if not session.changeset_id:
+        return None
+    return wiki.get_changeset(session.changeset_id, user)
 
 
 def discuss(session: ManualSession, user_message: str) -> str:
     session.messages.append({"role": "user", "content": user_message})
     reply = ab.call_model_chat(session.messages, max_tokens=600)
     session.messages.append({"role": "assistant", "content": reply})
+    _save_session(session)
     return reply
 
 
@@ -158,19 +195,20 @@ def propose_page(session: ManualSession, user: User) -> ManualSession:
     session.proposed_title, session.proposed_body = title, body
 
     schema_ctx = schema.context_block("individual", user.id)
-    source_ref_id = _store_raw_source(session.source, user)
-    session.changeset = wiki.build_changeset(
+    changeset = wiki.build_changeset(
         tier="individual",
         owner=user.id,
         user=user,
         primary_title=title,
         primary_body=body,
         log_source_type=session.source.source_type,
-        log_source_ref=source_ref_id,
+        log_source_ref=session.source_ref_id,
         log_mode="manual",
         schema_ctx=schema_ctx,
-        source_ref_id=source_ref_id,
+        source_ref_id=session.source_ref_id,
     )
+    session.changeset_id = changeset.id
+    _save_session(session)
     return session
 
 
@@ -178,24 +216,27 @@ def approve(session: ManualSession, user: User, selected: set[int] | None) -> li
     """On approval: write the selected changeset items (None = approve-all,
     empty set = reject-all handled by the caller before reaching here) and
     append one ingest log entry covering every page actually written."""
-    assert session.changeset is not None
+    changeset = get_changeset(session, user)
+    assert changeset is not None
     scope = make_partition_key("individual", user.id)
-    pages = wiki.apply_changeset(session.changeset, selected, user.id)
+    pages = wiki.apply_changeset(changeset, selected, user.id)
     if pages:
         log = IngestLogEntry(
             partition_key=scope,
-            source_type=session.changeset.log_source_type,
-            source_ref=session.changeset.log_source_ref,
+            source_type=changeset.log_source_type,
+            source_ref=changeset.log_source_ref,
             mode="manual",
             tier="individual",
             pages_affected=[p.id for p in pages],
         )
         ab.append_ingest_log(log)
-    _sessions.pop(session.id, None)
+    review_store.delete("sessions", user.id, session.id)
     return [p.title for p in pages]
 
 
-def discard(session_id: str) -> None:
-    session = _sessions.pop(session_id, None)
-    if session and session.changeset:
-        wiki.discard_changeset(session.changeset.id)
+def discard(session: ManualSession, user: User) -> None:
+    """Takes a resolved session rather than a bare id, so the caller has
+    already passed the ownership check in get_session()."""
+    if session.changeset_id:
+        wiki.discard_changeset(session.changeset_id, user.id)
+    review_store.delete("sessions", user.id, session.id)

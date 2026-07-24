@@ -1,23 +1,28 @@
 """Blob Storage client — the canonical content store (build spec: "Storage
 model: markdown canonical, index rebuildable").
 
-Only `app.abstractions`, `scripts/provision_cosmos.py`'s reindex path, and
-`app.ingest.pipeline` (for raw source writes) may import this module —
-business logic goes through the abstraction layer.
+Only `app.abstractions`, `scripts/provision_cosmos.py`, and modules that
+persist non-indexed app metadata alongside the wiki (`app.schema`,
+`app.lint`, `app.derived_views`, `app.knowledge_map`, `app.ingest.pipeline`)
+may import this module — business logic goes through the abstraction layer.
 
 Two containers:
     wiki    — page markdown + version snapshots (canonical wiki content)
     sources — immutable raw ingested files (never edited or deleted)
 """
 
+import contextlib
+import time
 from functools import lru_cache
 
-from azure.core.exceptions import ResourceNotFoundError
+from azure.core.exceptions import HttpResponseError, ResourceExistsError, ResourceNotFoundError
 from azure.storage.blob import BlobLeaseClient, BlobServiceClient
 
 from app.config import get_settings
 
 LEASE_SECONDS = 15  # short-lived; team writes acquire, write, release promptly
+LEASE_RETRY_ATTEMPTS = 5
+LEASE_RETRY_INITIAL_SECONDS = 0.25  # doubles per attempt: ~4s total before giving up
 
 
 @lru_cache
@@ -86,6 +91,13 @@ def list_page_paths(tier: str, owner_id: str) -> list[str]:
     ]
 
 
+def delete(path: str) -> None:
+    """Only for disposable app-metadata blobs (review state, caches). Page
+    bodies, version snapshots and raw sources are never deleted."""
+    with contextlib.suppress(ResourceNotFoundError):
+        _wiki_container().delete_blob(path)
+
+
 def list_paths(prefix: str) -> list[str]:
     """All blob names under a prefix, any depth — used for app-metadata
     blobs (schema doc version snapshots, lint queue) that live outside the
@@ -96,18 +108,43 @@ def list_paths(prefix: str) -> list[str]:
 # ------------------------------------------------------------ concurrency
 
 
+class LeaseContentionError(RuntimeError):
+    """A team page stayed leased by another writer for the whole retry
+    window. Surfaced rather than swallowed: the caller's write did not
+    happen, and the user must be told."""
+
+
 def acquire_lease(path: str) -> str | None:
-    """Team-tier writes take a lease before writing and release after, with
-    the caller retrying on failure — cheap because the append-only rule
-    means a retry is just a re-read-and-re-append, never a merge. Returns
-    None if the blob doesn't exist yet (nothing to lease — first writer for
-    a new page has no contention)."""
+    """Team-tier writes take a lease before writing and release after.
+
+    Retries on contention rather than failing the first time — leases are
+    held for LEASE_SECONDS at most and the append-only rule makes a retry
+    cheap (re-read and re-append, never a merge). Returns None if the blob
+    doesn't exist yet: there is nothing to lease, and the first writer for a
+    new page has no contention to lose to.
+    """
     blob_client = _wiki_container().get_blob_client(path)
     if not blob_client.exists():
         return None
-    lease = BlobLeaseClient(blob_client)
-    lease.acquire(lease_duration=LEASE_SECONDS)
-    return lease.id
+
+    delay = LEASE_RETRY_INITIAL_SECONDS
+    for attempt in range(LEASE_RETRY_ATTEMPTS):
+        try:
+            lease = BlobLeaseClient(blob_client)
+            lease.acquire(lease_duration=LEASE_SECONDS)  # returns None; the id is on the client
+            return lease.id
+        except (ResourceExistsError, HttpResponseError) as e:
+            status = getattr(e, "status_code", None)
+            if status != 409:
+                raise
+            if attempt == LEASE_RETRY_ATTEMPTS - 1:
+                raise LeaseContentionError(
+                    f"Could not acquire a lease on {path} after "
+                    f"{LEASE_RETRY_ATTEMPTS} attempts — another write is in progress."
+                ) from e
+            time.sleep(delay)
+            delay *= 2
+    return None  # unreachable; keeps the type checker honest
 
 
 def release_lease(path: str, lease_id: str) -> None:

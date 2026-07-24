@@ -124,5 +124,7 @@ def approve(changeset: wiki.Changeset, user: User, selected: set[int] | None) ->
     return pages
 
 
-def discard(changeset_id: str) -> None:
-    wiki.discard_changeset(changeset_id)
+def discard(changeset: wiki.Changeset) -> None:
+    """Takes a resolved changeset, not a bare id, so the caller has already
+    passed the ownership check in get_changeset()."""
+    wiki.discard_changeset(changeset.id, changeset.user_id)

@@ -20,9 +20,23 @@
     </button>
   </form>
   <form method="post" action="/{{ tier }}/{{ owner }}/lint/run">
-    <button type="submit">Run lint now</button>
+    <button type="submit" {{ 'disabled' if lint_status and lint_status.state == 'running' }}>
+      Run lint now</button>
   </form>
 </div>
+
+{% if lint_status and lint_status.state == "running" %}
+  <meta http-equiv="refresh" content="4">
+  <div class="card">
+    <p><strong>Lint is running…</strong>
+       <span class="muted">this page refreshes itself; findings appear together when the
+       pass finishes. A full pass over a large wiki takes a couple of minutes.</span></p>
+  </div>
+{% elif lint_status and lint_status.state == "failed" %}
+  <div class="card" style="border-color:#c77">
+    <p><strong>Lint did not finish.</strong> <span class="muted">{{ lint_status.error }}</span></p>
+  </div>
+{% endif %}
 <p class="muted">Manual: flags and proposes, nothing auto-fixed. Automatic: on the individual
    tier, all mechanical findings (missing cross-refs, stub pages, orphan flags) apply with no
    review gate. On the team tier, only missing cross-references apply automatically — and never

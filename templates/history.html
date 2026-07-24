@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}History — {{ page.title }}{% endblock %}
+{% block content %}
+<!-- Build spec, individual tier: contextual rewriting loses the chronological
+     trail the team tier gets from its append log. This is the prescribed fix —
+     each version with its date, triggering source, and what changed, derived on
+     demand from the version snapshots already in blob. -->
+<p class="muted"><a href="/{{ tier }}/{{ owner }}/page/{{ page.id }}">&larr; back to {{ page.title }}</a></p>
+<h1>History: {{ page.title }}</h1>
+<p class="muted">{{ entries|length }} version{{ "s" if entries|length != 1 else "" }}, newest first.
+  Reconstructed from stored snapshots — nothing here is written or cached.</p>
+
+{% for e in entries %}
+<div class="card">
+  <strong>v{{ e.version_number }}</strong>
+  <span class="muted">· {{ e.timestamp[:16].replace("T", " ") }}
+    · {{ e.change_type }}
+    {% if e.author_id %}· by {{ e.author_id }}{% endif %}
+    · {{ e.summary }}</span>
+  {% if e.source_ref %}
+    <p class="muted" style="margin:.35rem 0 0">Triggered by source: <code>{{ e.source_ref }}</code></p>
+  {% endif %}
+  {% if e.diff %}
+  <details style="margin-top:.5rem">
+    <summary class="muted">what changed</summary>
+    <pre class="diff">{{ e.diff }}</pre>
+  </details>
+  {% endif %}
+</div>
+{% else %}
+<p class="muted">No version history recorded for this page yet.</p>
+{% endfor %}
+{% endblock %}

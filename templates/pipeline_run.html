@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Building the wiki{% endblock %}
+{% block content %}
+<!-- The per-stage inspection panels below are the deliverable, not debug output.
+     The MVP exists to answer "is this synthesis any good", and the decisive
+     question — are these the right pages? — is answered by reading stage 2 and 3
+     output directly, not by inspecting the finished wiki. -->
+{% if status.state == "running" %}
+  <meta http-equiv="refresh" content="5">
+{% endif %}
+
+<p class="muted"><a href="/{{ tier }}/{{ owner }}/">&larr; back to wiki</a></p>
+<h1>
+  {% if status.state == "running" %}Building the wiki…
+  {% elif status.state == "complete" %}Wiki built
+  {% else %}Build failed{% endif %}
+</h1>
+
+<p class="muted">
+  {{ status.document_count }} document{{ "s" if status.document_count != 1 else "" }}
+  {%- if status.concept_count %} · {{ status.concept_count }} concepts extracted{% endif %}
+  {%- if status.page_count %} · {{ status.page_count }} pages written{% endif %}
+  {%- if status.total_model_calls %} · {{ status.total_model_calls }} model calls{% endif %}
+  · started {{ status.started_at[:16].replace("T", " ") }}
+  {%- if status.state == "running" %} · this page refreshes itself{% endif %}
+</p>
+
+{% if status.state == "failed" %}
+<div class="card" style="border-color:#c77">
+  <h3>Stopped at “{{ status.current_stage or "start" }}”</h3>
+  <p class="muted">{{ status.error }}</p>
+</div>
+{% endif %}
+
+{% if status.skipped %}
+<div class="card">
+  <h3>{{ status.skipped | length }} file(s) couldn't be read</h3>
+  <p class="muted">Not included in the wiki. Everything else was processed normally.</p>
+  <ul class="muted">{% for s in status.skipped %}<li>{{ s }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+{% if status.degraded_page_count %}
+<div class="card">
+  <p class="muted"><strong>{{ status.degraded_page_count }}</strong> page(s) had more source
+     material than fits in one pass and were written from per-source summaries instead.
+     Worth reading those more sceptically — they are marked in the page list below.</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Progress</h3>
+  <table>
+    <tr><th>Stage</th><th>Status</th><th>Model calls</th><th></th></tr>
+    {% for name in stages %}
+      {% set s = (status.stages | selectattr("name", "equalto", name) | list | first) %}
+      {% set live = s and s.started_at and not s.finished_at and not s.error %}
+      <tr>
+        <td>{{ name }}</td>
+        <td>
+          {% if s and s.error %}failed
+          {% elif s and s.finished_at %}done
+          {% elif live %}running…
+          {% else %}<span class="muted">waiting</span>{% endif %}
+        </td>
+        <td>{{ s.model_calls if s and s.model_calls else "" }}</td>
+        <td class="muted">
+          {% if live and s.progress_label %}
+            {# Live within-stage detail. Consolidate can run for twenty minutes,
+               and a stage reporting nothing is indistinguishable from a hung one. #}
+            {% if s.progress_total %}{{ s.progress_done }}/{{ s.progress_total }} · {% endif %}
+            {{ s.progress_label }}
+            {% if s.progress_at %}
+              <span title="last update">· {{ s.progress_at[11:19] }}</span>
+            {% endif %}
+          {% else %}{{ s.note if s else "" }}{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% if status.state == "complete" %}
+<p>
+  <a href="/{{ tier }}/{{ owner }}/">Open the wiki</a> ·
+  <a href="/{{ tier }}/{{ owner }}/map">See the map</a> ·
+  <a href="/{{ tier }}/{{ owner }}/lint">Review findings{% if status.lint_finding_count %}
+    ({{ status.lint_finding_count }}){% endif %}</a>
+</p>
+{% endif %}
+
+<h2>What it decided</h2>
+
+{% set ingest = artifacts.get("ingest") %}
+{% if ingest %}
+<div class="card">
+  <h3>Documents read</h3>
+  <details>
+    <summary class="muted">{{ ingest.documents | length }} document(s)</summary>
+    <table style="margin-top:.6rem">
+      <tr><th>Document</th><th>Type</th><th>Characters</th><th>Extraction calls</th></tr>
+      {% for d in ingest.documents %}
+        <tr><td>{{ d.doc_name }}</td><td>{{ d.source_type }}</td><td>{{ d.chars }}</td>
+            <td>{{ d.chunks or 1 }}</td></tr>
+      {% endfor %}
+    </table>
+    <p class="muted">Long documents are split into several extraction calls rather than
+       truncated — nothing is dropped, but a very large document costs proportionally more.</p>
+  </details>
+</div>
+{% endif %}
+
+{% set consolidated = artifacts.get("consolidate") %}
+{% if consolidated %}
+<div class="card">
+  <h3>The page set</h3>
+  <p class="muted">{{ consolidated.pages | length }} page(s) from
+     {{ ingest.documents | length if ingest else "?" }} document(s).
+     If this number equals the document count, concepts aren't being merged across
+     sources and the output is a filing cabinet rather than a wiki.</p>
+  <table>
+    <tr><th>Page</th><th>Fed by</th><th>Passages</th></tr>
+    {% for p in consolidated.pages %}
+    <tr>
+      <td>
+        <strong>{{ p.title }}</strong>{% if p.degraded %}
+          <span class="muted" title="Written from per-source summaries">· summarised</span>{% endif %}
+        <div class="muted">{{ p.description }}</div>
+      </td>
+      <td class="muted">{{ p.merged_from | join(", ") if p.merged_from else "—" }}</td>
+      <td class="muted">{{ p.passages | length }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h3>Merge decisions</h3>
+  <p class="muted">Where similarly-worded concepts were judged the same subject or kept apart.
+     Over-merging collapses distinct ideas; under-merging duplicates one idea across pages.</p>
+  {% if consolidated.merge_decisions %}
+    {% for d in consolidated.merge_decisions %}
+    <p style="margin:.5rem 0">
+      {% if d.merged %}<strong>Merged → {{ d.canonical_name }}</strong>
+      {% else %}<strong>Kept separate</strong>{% endif %}
+      <span class="muted">{{ d.candidates | join(" · ") }}</span>
+      {% if d.reasoning %}<br><span class="muted">{{ d.reasoning }}</span>{% endif %}
+    </p>
+    {% endfor %}
+  {% else %}
+    <p class="muted">No near-duplicate clusters needed a decision.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% set extracted = artifacts.get("concepts") %}
+{% if extracted %}
+<div class="card">
+  <h3>Concepts per document</h3>
+  <p class="muted">What each source was read as covering, before any merging — with the
+     verbatim passages that will be written from.</p>
+  {% for d in extracted.documents %}
+  <details style="margin:.4rem 0">
+    <summary>{{ d.doc_name }}
+      <span class="muted">— {{ d.concepts | length }} concept(s){% if d.error %}, failed{% endif %}</span>
+    </summary>
+    {% if d.error %}<p class="muted">{{ d.error }}</p>{% endif %}
+    <ul>
+      {% for c in d.concepts %}
+      <li>
+        <strong>{{ c.name }}</strong> <span class="muted">{{ c.description }}</span>
+        {% if c.passages %}
+        <ul class="muted">
+          {% for p in c.passages %}<li>“{{ p.text }}”</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

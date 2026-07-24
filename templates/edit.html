@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Edit — {{ page.title }}{% endblock %}
+{% block content %}
+<!-- Individual tier only. Team pages are append-only logs; the route rejects
+     tier == "team" outright rather than relying on this template to hide. -->
+<p class="muted"><a href="/{{ tier }}/{{ owner }}/page/{{ page.id }}">&larr; back to {{ page.title }}</a></p>
+<h1>Edit: {{ page.title }}</h1>
+<p class="muted">Saving creates version {{ page.version + 1 }}. The current version is kept —
+  see <a href="/{{ tier }}/{{ owner }}/page/{{ page.id }}/history">history</a>.</p>
+
+<form method="post" action="/{{ tier }}/{{ owner }}/page/{{ page.id }}/edit">
+  <p><textarea name="body" rows="24" style="width:100%;font-family:ui-monospace,monospace">{{ page.body }}</textarea></p>
+  <p class="muted">Markdown. Use [[Page Title]] to link to another page.</p>
+  <button type="submit">Save</button>
+  <a href="/{{ tier }}/{{ owner }}/page/{{ page.id }}" class="secondary" style="margin-left:.5rem">Cancel</a>
+</form>
+{% endblock %}

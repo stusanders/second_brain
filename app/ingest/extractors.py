@@ -27,20 +27,31 @@ class ExtractionError(Exception):
 MAX_CHARS = 200_000
 
 
-def extract_file(filename: str, data: bytes) -> ExtractedSource:
+def _cap(text: str, max_chars: int | None) -> str:
+    return text if max_chars is None else text[:max_chars]
+
+
+def extract_file(filename: str, data: bytes, max_chars: int | None = MAX_CHARS) -> ExtractedSource:
+    """`max_chars=None` extracts the whole document.
+
+    The default cap is cost discipline for single-document ingest, where the
+    text goes to the model in one call. The corpus pipeline passes None because
+    it chunks before extraction anyway, and silently dropping half of a 150-page
+    green paper would be far worse than a few extra calls — the loss would be
+    invisible in the output."""
     name = filename.lower()
     if name.endswith(".pdf"):
-        return ExtractedSource("pdf", filename, _pdf_text(data), data, filename)
+        return ExtractedSource("pdf", filename, _pdf_text(data, max_chars), data, filename)
     if name.endswith(".docx"):
-        return ExtractedSource("docx", filename, _docx_text(data), data, filename)
+        return ExtractedSource("docx", filename, _docx_text(data, max_chars), data, filename)
     if name.endswith(".pptx"):
-        return ExtractedSource("pptx", filename, _pptx_text(data), data, filename)
+        return ExtractedSource("pptx", filename, _pptx_text(data, max_chars), data, filename)
     if name.endswith((".xlsx", ".xlsm")):
-        return ExtractedSource("xlsx", filename, _xlsx_text(data), data, filename)
+        return ExtractedSource("xlsx", filename, _xlsx_text(data, max_chars), data, filename)
     if name.endswith(".csv"):
-        return ExtractedSource("csv", filename, _decode(data), data, filename)
+        return ExtractedSource("csv", filename, _decode(data, max_chars), data, filename)
     if name.endswith((".txt", ".md", ".markdown")):
-        return ExtractedSource("text", filename, _decode(data), data, filename)
+        return ExtractedSource("text", filename, _decode(data, max_chars), data, filename)
     raise ExtractionError(f"Unsupported file type: {filename}")
 
 
@@ -64,11 +75,11 @@ def extract_pasted(text: str) -> ExtractedSource:
     return ExtractedSource("pasted_text", "pasted text", body, body.encode("utf-8"), "pasted.txt")
 
 
-def _decode(data: bytes) -> str:
-    return data.decode("utf-8", errors="replace")[:MAX_CHARS]
+def _decode(data: bytes, max_chars: int | None = MAX_CHARS) -> str:
+    return _cap(data.decode("utf-8", errors="replace"), max_chars)
 
 
-def _pdf_text(data: bytes) -> str:
+def _pdf_text(data: bytes, max_chars: int | None = MAX_CHARS) -> str:
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(data))
@@ -77,10 +88,10 @@ def _pdf_text(data: bytes) -> str:
         # Scanned PDF with no text layer. OCR is in scope per spec but needs
         # a system tesseract install; surface a clear error until wired up.
         raise ExtractionError("PDF has no extractable text (scanned?). OCR not yet wired up.")
-    return text[:MAX_CHARS]
+    return _cap(text, max_chars)
 
 
-def _docx_text(data: bytes) -> str:
+def _docx_text(data: bytes, max_chars: int | None = MAX_CHARS) -> str:
     import docx
 
     document = docx.Document(io.BytesIO(data))
@@ -88,10 +99,10 @@ def _docx_text(data: bytes) -> str:
     for table in document.tables:
         for row in table.rows:
             parts.append(" | ".join(cell.text for cell in row.cells))
-    return "\n".join(parts)[:MAX_CHARS]
+    return _cap("\n".join(parts), max_chars)
 
 
-def _pptx_text(data: bytes) -> str:
+def _pptx_text(data: bytes, max_chars: int | None = MAX_CHARS) -> str:
     from pptx import Presentation
 
     prs = Presentation(io.BytesIO(data))
@@ -105,10 +116,10 @@ def _pptx_text(data: bytes) -> str:
             notes = slide.notes_slide.notes_text_frame.text.strip()
             if notes:
                 parts.append(f"[Speaker notes] {notes}")
-    return "\n".join(parts)[:MAX_CHARS]
+    return _cap("\n".join(parts), max_chars)
 
 
-def _xlsx_text(data: bytes) -> str:
+def _xlsx_text(data: bytes, max_chars: int | None = MAX_CHARS) -> str:
     """Structure + a bounded sample, not a raw cell dump (per spec, the model
     summarizes structure and key figures)."""
     import openpyxl
@@ -121,4 +132,4 @@ def _xlsx_text(data: bytes) -> str:
             parts.append(" | ".join("" if v is None else str(v) for v in row))
         if (ws.max_row or 0) > 50:
             parts.append(f"... ({ws.max_row - 50} more rows not shown)")
-    return "\n".join(parts)[:MAX_CHARS]
+    return _cap("\n".join(parts), max_chars)

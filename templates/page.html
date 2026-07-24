@@ -4,7 +4,8 @@
 <p class="muted"><a href="/{{ tier }}/{{ owner }}/">&larr; back to wiki</a></p>
 <h1>{{ page.title }}</h1>
 <p class="muted">v{{ page.version }} · updated {{ page.updated_at[:10] }}
-   {% if page.tier == "team" %} · append-only{% endif %}</p>
+   {% if page.tier == "team" %} · append-only{% else %}
+   · <a href="/{{ tier }}/{{ owner }}/page/{{ page.id }}/edit">Edit</a>{% endif %}</p>
 
 {% if page.tier == "team" %}
 <p class="muted">
@@ -54,6 +55,7 @@
       <li class="muted">v{{ v.version_number }} · {{ v.timestamp[:16].replace("T", " ") }} · {{ v.change_type }}</li>
     {% endfor %}
     </ul>
+    <p><a href="/{{ tier }}/{{ owner }}/page/{{ page.id }}/history">Full history with changes</a></p>
   </div>
 </div>
 {% endblock %}
